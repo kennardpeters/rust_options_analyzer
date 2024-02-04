@@ -1,0 +1,3 @@
+*.bin
+*.lock
+options_analyzer/target/*
