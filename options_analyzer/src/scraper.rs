@@ -20,10 +20,12 @@ fn scrape() -> std::io::Result<()> {
     //Instantiate string to store raw html scraped
     let mut stringed = String::new();
 
+    let url: &str = "";
+
 
     //Need to make this more reproducible (also input symbol)
     //TODO: build request url dynamically using format!
-    easy.url("https://finance.yahoo.com/quote/PLTR/options?date=1708041600&guce_referrer=aHR0cHM6Ly93d3cuZ29vZ2xlLmNvbS8&guce_referrer_sig=AQAAAFA6BeyERSfZD1VD5AVfBctn8o07D8SAFU7PDxJYsAMtQ6FldDIDNUQJCXXwjqakOc2yAXI8cbQQAASB7Nw5J7-Uoq9NaAw4Ffk2Q2cv8MUCeWbyidPNs7w8CSZgKxbtnHvjqC0rJlqF045RS71bHgs5-uDVSLwzEEMxoIfhwAm6&p=PLTR").unwrap();
+    easy.url(url).unwrap();
     //Scope declared here in order to transfer ownership of stringed back to main function
     {
         let mut transfer = easy.transfer();
@@ -104,7 +106,8 @@ fn scrape() -> std::io::Result<()> {
 
 async fn async_scrape() -> Result<(), Box<dyn std::error::Error>> {
     //TODO: Build url dynamically here:
-    let resp = match reqwest::get("https://www.wallhaven.cc//random").await {
+    let url: &str = "";
+    let resp = match reqwest::get(url).await {
         Ok(x) => x,
         Err(_) => {
             println!("{}", "error on /random request");
