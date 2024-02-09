@@ -9,6 +9,7 @@ use scraper::{Html, Selector};
 use std::{process, str};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
+use serde_json;
 
 use curl::easy::Easy;
 
@@ -118,7 +119,7 @@ use curl::easy::Easy;
 
     
 
-    pub fn scrape(url: &str) -> std::io::Result<TimeSeries> {
+    pub fn scrape(url: &str) -> std::io::Result<String> {
         // TODO: Change to json instead of saving to a file once queue is made
     
         //Instantiate Easy instance for scraping
@@ -157,12 +158,14 @@ use curl::easy::Easy;
 
         //process_bytes here
         let ts = process_bytes(stringed);
+        
+        let serialized = serde_json::to_string(&ts).unwrap();
     
-        Ok(ts)
+        Ok(serialized)
         
     }
 
-    pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::Error>> {
+    pub async fn async_scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
         //TODO: Build url dynamically here:
         let resp = match reqwest::get(url).await {
             Ok(x) => x,
@@ -177,8 +180,10 @@ use curl::easy::Easy;
     
         //TODO: Call process_bytes here
         let ts = process_bytes(text);
+        
+        let serialized = serde_json::to_string(&ts).unwrap();
         //return timeSeries
-        Ok(ts)
+        Ok(serialized)
     }
     
     fn process_bytes(stringed: String) -> TimeSeries {

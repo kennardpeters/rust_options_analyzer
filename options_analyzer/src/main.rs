@@ -1,13 +1,20 @@
-use std::time::Instant;
+use tokio::time::{interval, Duration};
 
 mod options_scraper;
 
-fn main() {
-    let url = "https://finance.yahoo.com/quote/SPY/options?p=SPY";
-    let now = Instant::now();
-
-    let output_object = options_scraper::scrape(url).expect("Scrape Failed!");
-    println!("Object to serialize: {:?}", output_object);
+#[tokio::main]
+async fn main() {
     
-    println!("Running options_scraper::scrape() took {} seconds.", now.elapsed().as_secs());
+    // Define a periodic interval
+    let mut interval = interval(Duration::from_secs(15));
+
+    //loop indefinitely
+    loop {
+        // Wait for the next tick of the interval
+        interval.tick().await;
+        let url = "";
+        let output_object = options_scraper::scrape(url).expect("Scrape Failed!");
+        println!("Serialized Object: {:?}", output_object);
+    }
+
 }
