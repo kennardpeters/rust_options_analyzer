@@ -1,7 +1,6 @@
 extern crate amqprs;
 extern crate tracing_subscriber;
 extern crate async_trait;
-extern crate frame;
 extern crate tracing;
 extern crate serde_json;
 extern crate std;
@@ -28,7 +27,6 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub struct ExampleConsumer {
    no_ack: bool, 
-
 }
 
 impl ExampleConsumer {
@@ -82,7 +80,8 @@ pub async fn publish_example() {
         .try_init()
         .ok();
 
-
+    
+    //Open a connection
     let connection = Connection::open(&OpenConnectionArguments::new(
         "localhost",
         //"host.docker.internal",
@@ -104,7 +103,7 @@ pub async fn publish_example() {
         .await
         .unwrap();
 
-    // declare a queue
+    // declare a queue (Inside new queue)
     let (queue_name, _, _) = channel
         .queue_declare(QueueDeclareArguments::durable_client_named(
             "amqprs.examples.basic",
@@ -160,4 +159,53 @@ pub async fn publish_example() {
     //explicitly close
     channel.close().await.unwrap();
     connection.close().await.unwrap();
+}
+
+//Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
+#[async_trait]
+trait Queue: AsyncConsumer {
+    //Declare a new queue
+    //fn new()
+    //open new connection?
+    //register callback
+    //Open channel + defaultChannelCallback
+
+    //fn new(channel)
+    //declare the queue from the channel
+    //bind the queue to the exchange
+    fn new(&self);
+
+    //ProcessQueue()
+    //Start a consumer on channel?
+    //and run in the background
+    fn process_queue(&self);
+
+
+    //Consume func
+    async fn consume(
+        &mut self, 
+        channel: &Channel, 
+        deliver: Deliver, 
+        _basic_properties: BasicProperties, 
+        content: Vec<u8>
+    );
+    //unserialize content
+    //Process func
+    //Insert into next queue
+
+    //Drop trait 
+    //Close connection?
+    //Close Channel?
+}
+
+
+
+pub async fn publish_to_queue(channel: Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
+    let args = BasicPublishArguments::new(exchange_name, routing_key);
+
+    channel
+        .basic_publish(BasicProperties::default(), content, args)
+        .await
+        .unwrap();
+    //Close connection & Channel?
 }

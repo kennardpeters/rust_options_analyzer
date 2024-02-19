@@ -5,6 +5,10 @@ mod mq;
 
 #[tokio::main]
 async fn main() {
+    //Similar to drop trait for objects but for the main function
+    //process::at_exit(|| {
+    //  close connection to rabbitmq
+    //});
 
     let future = async {
         mq::publish_example().await;
@@ -23,5 +27,6 @@ async fn main() {
     //    let output_object = options_scraper::scrape(url).expect("Scrape Failed!");
     //    println!("Serialized Object: {:?}", output_object);
     //}
+    //process::exit(0);
 
 }
