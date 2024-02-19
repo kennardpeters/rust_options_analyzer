@@ -1,30 +1,91 @@
 extern crate amqprs;
-//extern crate tracing_subscriber;
+extern crate tracing_subscriber;
+extern crate async_trait;
+extern crate frame;
+extern crate tracing;
+extern crate serde_json;
+extern crate std;
+
 use amqprs::{
     callbacks::{DefaultChannelCallback, DefaultConnectionCallback},
     channel::{
-        BasicConsumeArguments, BasicPublishArguments, QueueBindArguments, QueueDeclareArguments,
+        BasicConsumeArguments, BasicPublishArguments, QueueBindArguments, QueueDeclareArguments, Channel
     },
     connection::{Connection, OpenConnectionArguments},
-    consumer::DefaultConsumer,
+    consumer::AsyncConsumer,//DefaultConsumer, 
     BasicProperties,
+    Deliver,
 };
 use tokio::time;
+use std::str;
 
-//use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use async_trait::async_trait;
+use serde_json::Value;
+#[cfg(feature = "traces")]
+use tracing::info;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+
+pub struct ExampleConsumer {
+   no_ack: bool, 
+
+}
+
+impl ExampleConsumer {
+    pub fn new(no_ack: bool) -> Self {
+        Self { no_ack }
+    }
+}
+
+#[async_trait]
+impl AsyncConsumer for ExampleConsumer {
+    async fn consume(
+        &mut self,
+        channel: &Channel,
+        deliver: Deliver,
+        _basic_properities: BasicProperties,
+        content: Vec<u8>,
+    ) {
+        #[cfg(feature = "traces")]
+        info!(
+            "consume delivery {} on channel {}, content: {}",
+            deliver,
+            channel,
+            content,
+        );
+        let stringed_bytes = match str::from_utf8(&content) {
+                    Ok(stringed) => stringed,
+                    Err(e) => {
+                        println!("Stringing bytes failed!");
+                        println!("{}", e);
+                        //Handle error below
+                        panic!("{}", e);
+                    },
+                };
+        let unserialized_content: Value = serde_json::from_str(&stringed_bytes).unwrap();
+
+        println!("The following data {} was received from {}", unserialized_content["data"], unserialized_content["publisher"]);
+        
+
+        dbg!(unserialized_content);
+
+        //Insert into next queue
+    }
+}
+
 
 pub async fn publish_example() {
 
-    //tracing_subscriber::registry()
-    //    .with(fmt::layer())
-    //    .with(EnvFilter::from_default_env())
-    //    .try_init()
-    //    .ok();
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init()
+        .ok();
 
 
     let connection = Connection::open(&OpenConnectionArguments::new(
-        //"localhost",
-        "host.docker.internal",
+        "localhost",
+        //"host.docker.internal",
         5672,
         "guest",
         "guest",
@@ -64,13 +125,15 @@ pub async fn publish_example() {
         .await
         .unwrap();
     ///////////////////////////////////////////////
+    // start consumer with given name
     let args = BasicConsumeArguments::new(
         &queue_name,
         "example_basic_pub_sub"
     );
-
+    //Insert custom consumer into basic_consume
     channel
-        .basic_consume(DefaultConsumer::new(args.no_ack), args)
+        //.basic_consume(DefaultConsumer::new(args.no_ack), args)
+        .basic_consume(ExampleConsumer::new(args.no_ack), args)
         .await
         .unwrap();
 
@@ -78,7 +141,7 @@ pub async fn publish_example() {
     let content = String::from(
         r#"
             {
-                "publisher": "example"
+                "publisher": "example",
                 "data": "Hello, amqprs!"
             }
         "#,
