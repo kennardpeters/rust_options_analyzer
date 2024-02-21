@@ -8,9 +8,9 @@ extern crate std;
 use amqprs::{
     callbacks::{DefaultChannelCallback, DefaultConnectionCallback},
     channel::{
-        BasicConsumeArguments, BasicPublishArguments, QueueBindArguments, QueueDeclareArguments, Channel
+        self, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
     },
-    connection::{Connection, OpenConnectionArguments},
+    connection::{self, Connection, OpenConnectionArguments},
     consumer::AsyncConsumer,//DefaultConsumer, 
     BasicProperties,
     Deliver,
@@ -18,11 +18,81 @@ use amqprs::{
 use tokio::time;
 use std::str;
 
+
 use async_trait::async_trait;
 use serde_json::Value;
 #[cfg(feature = "traces")]
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+const QUEUE_LIST: &[&str] = &["parse_queue"];
+
+pub struct MQConnection {
+    connection: Connection,
+    channel: Channel, 
+}
+
+impl MQConnection {
+    pub async fn new(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+    ) -> Self {
+        let connection = Connection::open(&OpenConnectionArguments::new(
+            host,
+            port,
+            username,
+            password,
+        ))
+        .await
+        .unwrap();
+
+        connection.register_callback(DefaultConnectionCallback)
+        .await
+        .unwrap();
+
+        let channel = connection.open_channel(None).await.unwrap();
+        channel
+            .register_callback(DefaultChannelCallback)
+            .await
+            .unwrap();
+        Self { 
+            connection,
+            channel,
+        }
+
+    }
+
+    //add queue method
+    async fn add_queue(&mut self, queue_name: &str) {
+        //Declare queue
+        let (queue_name, _, _) = self.channel
+        .queue_declare(QueueDeclareArguments::durable_client_named(queue_name))
+            .await
+            .unwrap()
+            .unwrap();
+        
+        
+        //bind queue to exchange
+        let routing_key = "amqprs.example";
+        let exchange_name = "amq.topic";
+
+        self.channel
+            .queue_bind(QueueBindArguments::new(
+                &queue_name,
+                exchange_name,
+                routing_key,
+            ))
+            .await
+            .unwrap();
+    }
+
+    async fn drop(self) {
+        self.channel.close().await.unwrap();
+        self.connection.close().await.unwrap();
+    }
+}
 
 
 pub struct ExampleConsumer {
@@ -81,7 +151,7 @@ pub async fn publish_example() {
         .ok();
 
     
-    //Open a connection
+    //Open a connection (Migrate to new connection struct inside new method)
     let connection = Connection::open(&OpenConnectionArguments::new(
         "localhost",
         //"host.docker.internal",
@@ -192,10 +262,6 @@ trait Queue: AsyncConsumer {
     //unserialize content
     //Process func
     //Insert into next queue
-
-    //Drop trait 
-    //Close connection?
-    //Close Channel?
 }
 
 

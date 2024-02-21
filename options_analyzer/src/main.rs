@@ -1,13 +1,17 @@
 use tokio::time::{interval, Duration};
+//use mq::MQConnection;
 
 mod options_scraper;
 mod mq;
 
 #[tokio::main]
 async fn main() {
+    //"host.docker.internal"
+    //let mq_connection = MQConnection::new("localhost", 5672, "guest", "guest"); 
     //Similar to drop trait for objects but for the main function
     //process::at_exit(|| {
     //  close connection to rabbitmq
+    //  mq.drop();
     //});
 
     let future = async {
