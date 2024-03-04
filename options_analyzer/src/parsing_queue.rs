@@ -4,7 +4,7 @@ extern crate serde_json;
 extern crate async_trait;
 
 use amqprs::{
-    channel::{BasicConsumeArguments, Channel},
+    channel::{BasicAckArguments, BasicConsumeArguments, Channel},
     consumer::AsyncConsumer,
     BasicProperties,
     Deliver,
@@ -128,6 +128,13 @@ impl AsyncConsumer for ParsingConsumer {
 
         //Insert into next queue
         publish_to_queue(channel, "amq.topic", "amqprs.example", e_content).await;
+
+        //TODO: Move this to callback?
+
+        let args = BasicAckArguments::new(deliver.delivery_tag(), false);
+
+        channel.basic_ack(args).await.unwrap();
+        println!("DELIVERY TAG: {}", deliver.delivery_tag())
 
     }
 }
