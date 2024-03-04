@@ -1,0 +1,29 @@
+services:
+  rust:
+    build:
+      context: ./options_analyzer
+    ports: 
+      - "50005:50005"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+  rabbitmq:
+    image: rabbitmq:management-alpine
+    container_name: 'rabbitmq'
+    ports:
+      - 5672:5672
+      - 15672:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    volumes:
+      - ~/.docker-conf/rabbitmq/data:/var/lib/rabbitmq/
+      - ~/.docker-conf/rabbigmq/log/:/var/log/rabbitmq/
+    networks:
+      - rabbitmq_go_net
+
+networks:
+  rabbitmq_go_net:
+    driver: bridge
