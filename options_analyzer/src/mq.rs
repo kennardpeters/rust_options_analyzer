@@ -8,15 +8,15 @@ extern crate std;
 use amqprs::{
     callbacks::{DefaultChannelCallback, DefaultConnectionCallback},
     channel::{
-        self, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
+        BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
     },
-    connection::{self, Connection, OpenConnectionArguments},
+    connection::{Connection, OpenConnectionArguments},
     consumer::AsyncConsumer,//DefaultConsumer, 
     BasicProperties,
     Deliver,
 };
 use tokio::time;
-use std::str;
+use std::{borrow::BorrowMut, str, sync::Arc};
 
 
 use async_trait::async_trait;
@@ -25,25 +25,42 @@ use serde_json::Value;
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+use crate::parsing_queue::{self, ParsingQueue};
+
 const QUEUE_LIST: &[&str] = &["parse_queue"];
 
-pub struct MQConnection {
-    connection: Connection,
-    channel: Channel, 
+pub struct MQConnection<'a> {
+    connection: Option<Connection>,
+    pub channel: Option<Channel>, 
+    pub host: &'a str,
+    pub port: u16,
+    pub username: &'a str,
+    pub password: &'a str
 }
 
-impl MQConnection {
-    pub async fn new(
-        host: &str,
+impl<'a> MQConnection<'a> {
+    pub fn new(
+        host: &'a str,
         port: u16,
-        username: &str,
-        password: &str,
-    ) -> Self {
-        let connection = Connection::open(&OpenConnectionArguments::new(
+        username: &'a str,
+        password: &'a str,
+    ) -> MQConnection<'a> {
+        Self { 
+            connection: None,
+            channel: None,
             host,
             port,
             username,
             password,
+        }
+
+    }
+    pub async fn open(&mut self) -> Arc<String> {
+        let connection = Connection::open(&OpenConnectionArguments::new(
+            self.host,
+            self.port,
+            self.username,
+            self.password,
         ))
         .await
         .unwrap();
@@ -52,33 +69,33 @@ impl MQConnection {
         .await
         .unwrap();
 
+
         let channel = connection.open_channel(None).await.unwrap();
         channel
             .register_callback(DefaultChannelCallback)
             .await
             .unwrap();
-        Self { 
-            connection,
-            channel,
-        }
 
+        self.connection = Some(connection);
+        self.channel = Some(channel);
+
+        //TODO: Make better return
+        Arc::new("Success".to_string())
     }
 
     //add queue method
-    async fn add_queue(&mut self, queue_name: &str) {
+    //async fn add_queue(&mut self, queue_name: &str) {
+    pub async fn add_queue(&mut self, queue_name: &str, routing_key: &str, exchange_name: &str) {
         //Declare queue
-        let (queue_name, _, _) = self.channel
+        let channel = self.channel.clone().expect("Channel was None").clone();
+        let (queue_name, _, _) = channel
         .queue_declare(QueueDeclareArguments::durable_client_named(queue_name))
             .await
             .unwrap()
             .unwrap();
         
-        
-        //bind queue to exchange
-        let routing_key = "amqprs.example";
-        let exchange_name = "amq.topic";
 
-        self.channel
+        channel
             .queue_bind(QueueBindArguments::new(
                 &queue_name,
                 exchange_name,
@@ -88,9 +105,11 @@ impl MQConnection {
             .unwrap();
     }
 
-    async fn drop(self) {
-        self.channel.close().await.unwrap();
-        self.connection.close().await.unwrap();
+
+
+    pub async fn close_connections(&self) {
+        self.channel.clone().expect("Channel was None").close().await.unwrap();
+        self.connection.clone().expect("Channel was None").close().await.unwrap();
     }
 }
 
@@ -130,7 +149,13 @@ impl AsyncConsumer for ExampleConsumer {
                         panic!("{}", e);
                     },
                 };
-        let unserialized_content: Value = serde_json::from_str(&stringed_bytes).unwrap();
+        let unserialized_content: Value = match serde_json::from_str(&stringed_bytes) {
+            Ok(unser_con) => unser_con,
+            Err(e) => {
+                panic!("{}", e);
+            }
+
+        };
 
         println!("The following data {} was received from {}", unserialized_content["data"], unserialized_content["publisher"]);
         
@@ -199,6 +224,7 @@ pub async fn publish_example() {
         &queue_name,
         "example_basic_pub_sub"
     );
+
     //Insert custom consumer into basic_consume
     channel
         //.basic_consume(DefaultConsumer::new(args.no_ack), args)
@@ -233,9 +259,11 @@ pub async fn publish_example() {
 
 //Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
 #[async_trait]
-trait Queue: AsyncConsumer {
+pub trait Queue {
     //Declare a new queue
     //fn new()
+
+    fn queue_name(&self) -> &str;
     //open new connection?
     //register callback
     //Open channel + defaultChannelCallback
@@ -243,22 +271,24 @@ trait Queue: AsyncConsumer {
     //fn new(channel)
     //declare the queue from the channel
     //bind the queue to the exchange
-    fn new(&self);
+    //fn new(&mut self, queue_name: &str, channel: Channel, routing_key: &str, exchange_name: &str) -> Queue;
+
+    fn args(&self) -> BasicConsumeArguments;
 
     //ProcessQueue()
     //Start a consumer on channel?
     //and run in the background
-    fn process_queue(&self);
+    //async fn process_queue(&mut self);
 
 
-    //Consume func
-    async fn consume(
-        &mut self, 
-        channel: &Channel, 
-        deliver: Deliver, 
-        _basic_properties: BasicProperties, 
-        content: Vec<u8>
-    );
+    //Consume func (Do we need this?
+    //async fn consume(
+    //    &mut self, 
+    //    channel: &Channel, 
+    //    deliver: Deliver, 
+    //    _basic_properties: BasicProperties, 
+    //    content: Vec<u8>
+    //);
     //unserialize content
     //Process func
     //Insert into next queue
@@ -266,12 +296,11 @@ trait Queue: AsyncConsumer {
 
 
 
-pub async fn publish_to_queue(channel: Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
+pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
     let args = BasicPublishArguments::new(exchange_name, routing_key);
 
     channel
         .basic_publish(BasicProperties::default(), content, args)
         .await
         .unwrap();
-    //Close connection & Channel?
 }
