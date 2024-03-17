@@ -6,14 +6,9 @@ extern crate serde_json;
 extern crate std;
 
 use amqprs::{
-    callbacks::{DefaultChannelCallback, DefaultConnectionCallback},
-    channel::{
-        BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
-    },
-    connection::{Connection, OpenConnectionArguments},
-    consumer::AsyncConsumer,//DefaultConsumer, 
-    BasicProperties,
-    Deliver,
+    callbacks::{DefaultChannelCallback, DefaultConnectionCallback}, channel::{
+        BasicAckArguments, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
+    }, connection::{Connection, OpenConnectionArguments}, consumer::AsyncConsumer, AmqpChannelId, BasicProperties, Deliver
 };
 use tokio::time;
 use std::{borrow::BorrowMut, str, sync::Arc};
@@ -31,7 +26,7 @@ const QUEUE_LIST: &[&str] = &["parse_queue"];
 
 pub struct MQConnection<'a> {
     connection: Option<Connection>,
-    pub channel: Option<Channel>, 
+    //pub channel: Option<Channel>, 
     pub host: &'a str,
     pub port: u16,
     pub username: &'a str,
@@ -47,7 +42,7 @@ impl<'a> MQConnection<'a> {
     ) -> MQConnection<'a> {
         Self { 
             connection: None,
-            channel: None,
+            //channel: None,
             host,
             port,
             username,
@@ -70,24 +65,43 @@ impl<'a> MQConnection<'a> {
         .unwrap();
 
 
-        let channel = connection.open_channel(None).await.unwrap();
-        channel
-            .register_callback(DefaultChannelCallback)
-            .await
-            .unwrap();
+        //let channel = connection.open_channel(None).await.unwrap();
+        //channel
+        //    .register_callback(DefaultChannelCallback)
+        //    .await
+        //    .unwrap();
 
         self.connection = Some(connection);
-        self.channel = Some(channel);
+        //self.channel = Some(channel);
 
         //TODO: Make better return
         Arc::new("Success".to_string())
     }
 
+    //Consider changing return to Option or Result type
+    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Option<Channel> {
+        let connection = self.connection.clone();
+
+        let mut channel = connection.unwrap().open_channel(channel_id).await.unwrap();
+    
+        channel
+            .register_callback(DefaultChannelCallback)
+            .await
+            .unwrap();
+
+        return Some(channel);
+    }
+
+    pub async fn open_channel(&mut self) -> Arc<Option<Channel>> {
+       //return channel on connection struct in order to run queues on separate channels
+       ///Need to come up with a way to assign channel ID
+       return Arc::new(Some(self.connection.as_mut().unwrap().open_channel(Some(1)).await.unwrap()))
+    }
+
     //add queue method
     //async fn add_queue(&mut self, queue_name: &str) {
-    pub async fn add_queue(&mut self, queue_name: &str, routing_key: &str, exchange_name: &str) {
+    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) {
         //Declare queue
-        let channel = self.channel.clone().expect("Channel was None").clone();
         let (queue_name, _, _) = channel
         .queue_declare(QueueDeclareArguments::durable_client_named(queue_name))
             .await
@@ -108,7 +122,7 @@ impl<'a> MQConnection<'a> {
 
 
     pub async fn close_connections(&self) {
-        self.channel.clone().expect("Channel was None").close().await.unwrap();
+        //self.channel.clone().expect("Channel was None").close().await.unwrap();
         self.connection.clone().expect("Channel was None").close().await.unwrap();
     }
 }
@@ -157,10 +171,15 @@ impl AsyncConsumer for ExampleConsumer {
 
         };
 
-        println!("The following data {} was received from {}", unserialized_content["data"], unserialized_content["publisher"]);
+        println!("The following data {} was received in Example Consumer from {}", unserialized_content["data"], unserialized_content["publisher"]);
         
 
         dbg!(unserialized_content);
+
+
+        let args = BasicAckArguments::new(deliver.delivery_tag(), false);
+
+        channel.basic_ack(args).await.unwrap();
 
         //Insert into next queue
     }
@@ -297,6 +316,7 @@ pub trait Queue {
 
 
 pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
+    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
     let args = BasicPublishArguments::new(exchange_name, routing_key);
 
     channel

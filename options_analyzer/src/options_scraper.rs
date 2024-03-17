@@ -18,28 +18,28 @@ use curl::easy::Easy;
 
     //Brainstorm how to make more dynamic (schemaless?)
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Contract {
-        timestamp: i64,
-        contract_name: String,
-        last_trade_name: String,
-        strike: String,
-        last_price: String,
-        bid: String,
-        ask: String,
-        change: String,
-        percent_change: String,
-        volume: String,
-        open_interest: String,
-        implied_volatility: String,
+    pub struct UnparsedContract {
+        pub timestamp: i64,
+        pub contract_name: String,
+        pub last_trade_date: String,
+        pub strike: String,
+        pub last_price: String,
+        pub bid: String,
+        pub ask: String,
+        pub change: String,
+        pub percent_change: String,
+        pub volume: String,
+        pub open_interest: String,
+        pub implied_volatility: String,
     }
 
-    impl Contract {
+    impl UnparsedContract {
 
-        pub fn new() -> Contract {
-            Contract{
+        pub fn new() -> UnparsedContract {
+            UnparsedContract{
                 timestamp: Utc::now().timestamp(),
                 contract_name: "".to_string(),
-                last_trade_name: "".to_string(),
+                last_trade_date: "".to_string(),
                 strike: "".to_string(),
                 last_price: "".to_string(),
                 bid: "".to_string(),
@@ -57,7 +57,7 @@ use curl::easy::Easy;
             [
             "timestame",
             "contract_name",
-            "last_trade_name",
+            "last_trade_date",
             "strike",
             "last_price",
             "bid",
@@ -76,7 +76,7 @@ use curl::easy::Easy;
                     self.contract_name = value;
                 },
                 2 => {
-                    self.last_trade_name = value;
+                    self.last_trade_date = value;
                 },
                 3 => {
                     self.strike = value;
@@ -113,14 +113,13 @@ use curl::easy::Easy;
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TimeSeries {
-        data: Vec<Contract>,
+        pub data: Vec<UnparsedContract>,
     }
 
 
     
 
     pub fn scrape(url: &str) -> std::io::Result<String> {
-        // TODO: Change to json instead of saving to a file once queue is made
     
         //Instantiate Easy instance for scraping
         let mut easy = Easy::new();
@@ -165,7 +164,7 @@ use curl::easy::Easy;
         
     }
 
-    pub async fn async_scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::Error>> {
         //TODO: Build url dynamically here:
         let resp = match reqwest::get(url).await {
             Ok(x) => x,
@@ -180,16 +179,14 @@ use curl::easy::Easy;
     
         //TODO: Call process_bytes here
         let ts = process_bytes(text);
-        
-        let serialized = serde_json::to_string(&ts).unwrap();
-        //return timeSeries
-        Ok(serialized)
+        Ok(ts)
     }
+        
     
     fn process_bytes(stringed: String) -> TimeSeries {
         //Instantiate list for storing parsed data
         let mut scraped_elements = Vec::new();
-        let mut contracts:Vec<Contract> = Vec::new();
+        let mut contracts:Vec<UnparsedContract> = Vec::new();
     
         // parsing block
         let dom = Html::parse_document(stringed.as_str());
@@ -210,7 +207,7 @@ use curl::easy::Easy;
 
             if count >= 12 {
                 let mut i = 1;
-                let mut new_contract = Contract::new();
+                let mut new_contract = UnparsedContract::new();
                 while i < 12 {
                     new_contract.idx_to_key(i, contract[i].to_string());
                     i += 1;
