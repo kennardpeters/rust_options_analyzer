@@ -19,7 +19,7 @@ pub use mq::Queue;
 
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
    //"host.docker.internal" 
     let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
 
@@ -36,8 +36,14 @@ async fn main() {
     let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new(queue_name, routing_key, exchange_name, tx.clone())));
 
     let mut mq_connection_p = mq_connection.clone();
-    //add channel
-    mq_connection_p.lock().await.open().await;
+    //TODO: add error handling here
+    match mq_connection_p.lock().await.open().await {
+        Ok(_) => {}
+        Err(e) => {
+            println!("Error while opening main level connection to rabbitmq: {}", e);
+            process::exit(1);
+        }
+    }
     let mut channel = Some(mq_connection_p.lock().await.add_channel(Some(3)).await.unwrap());
     //add queue
     mq_connection_p.lock().await.add_queue(channel.as_mut().unwrap(), "parsing_queue", routing_key, exchange_name).await;
@@ -84,14 +90,27 @@ async fn main() {
         let routing_key = "amqprs.example";
         let exchange_name = "amq.direct";
         let mut mq_connection_ce = mq_connection_ce.lock().await;
-        mq_connection_ce.open().await;
-
+        //TODO: Add error handling here
+        match mq_connection_ce.open().await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("Error occurred while opening connection: {}", e);
+                process::exit(1);
+            } 
+        }
 
         let args = amqprs::channel::BasicConsumeArguments::new(
             &queue_name,
             "example_basic_pub_sub"
         );
-        let mut channel = Some(mq_connection_ce.add_channel(Some(1)).await.unwrap());
+        //let mut channel = Some(mq_connection_ce.add_channel(Some(1)).await.unwrap());
+        let mut channel = match mq_connection_ce.add_channel(Some(1)).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("Error occurred while adding channel: {}", e);
+                process::exit(1);
+            }
+        };
         let _ = mq_connection_ce.add_queue(channel.as_mut().unwrap(), "amqprs.examples.basic", routing_key, exchange_name).await;
         channel.as_mut().unwrap() 
         .basic_consume(mq::ExampleConsumer::new(args.no_ack), args)
@@ -105,8 +124,23 @@ async fn main() {
     let mut mq_connection_c = mq_connection.clone();
     tokio::spawn(async move {
         let mut mq_connection_c = mq_connection_c.lock().await;
-        mq_connection_c.open().await;
-        let mut channel = Some(mq_connection_c.add_channel(Some(2)).await.unwrap());
+        //TODO: Add error handling here (Possibly overload is_err to return error message)
+        match mq_connection_c.open().await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("Error occurred while opening connection: {}", e);
+                process::exit(1);
+            }
+        };
+        //let mut channel = Some(mq_connection_c.add_channel(Some(2)).await.unwrap());
+        let mut channel = match mq_connection_c.add_channel(Some(2)).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("Error occurred while adding channel: {}", e);
+                process::exit(1);
+            }
+        };
+
         let _ = mq_connection_c.add_queue(channel.as_mut().unwrap(), "parsing_queue", "parsing_queue", "amq.direct").await;
         let parsing_queue = parsing_queue.clone();
         parsing_queue.lock().await.process_queue(channel.as_mut().unwrap()).await;

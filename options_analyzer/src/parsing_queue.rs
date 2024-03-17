@@ -49,6 +49,7 @@ impl<'a> ParsingQueue<'a> {
     
     //Start a consumer on channel
     //NEED a separate consumer struct here
+    //TODO: Add Result type as return to handle errors
     pub async fn process_queue(&mut self, channel: &mut Channel) {
         let args = BasicConsumeArguments::new(
             &self.name,
@@ -106,6 +107,7 @@ impl ParsingConsumer {
 #[async_trait]
 impl AsyncConsumer for ParsingConsumer {
 
+    //TODO: Add error handling to function 
     async fn consume(
         &mut self,
         channel: &Channel,

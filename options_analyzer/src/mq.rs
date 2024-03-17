@@ -26,7 +26,6 @@ const QUEUE_LIST: &[&str] = &["parse_queue"];
 
 pub struct MQConnection<'a> {
     connection: Option<Connection>,
-    //pub channel: Option<Channel>, 
     pub host: &'a str,
     pub port: u16,
     pub username: &'a str,
@@ -42,7 +41,6 @@ impl<'a> MQConnection<'a> {
     ) -> MQConnection<'a> {
         Self { 
             connection: None,
-            //channel: None,
             host,
             port,
             username,
@@ -50,46 +48,43 @@ impl<'a> MQConnection<'a> {
         }
 
     }
-    pub async fn open(&mut self) -> Arc<String> {
+    pub async fn open(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = Connection::open(&OpenConnectionArguments::new(
             self.host,
             self.port,
             self.username,
             self.password,
         ))
-        .await
-        .unwrap();
+        .await?;
 
         connection.register_callback(DefaultConnectionCallback)
-        .await
-        .unwrap();
-
-
-        //let channel = connection.open_channel(None).await.unwrap();
-        //channel
-        //    .register_callback(DefaultChannelCallback)
-        //    .await
-        //    .unwrap();
+        .await?;
 
         self.connection = Some(connection);
-        //self.channel = Some(channel);
 
         //TODO: Make better return
-        Arc::new("Success".to_string())
+        Ok(())
     }
 
-    //Consider changing return to Option or Result type
-    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Option<Channel> {
+    //TODO: Change return to Option or Result type
+    //pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Option<Channel> {
+    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
         let connection = self.connection.clone();
 
-        let mut channel = connection.unwrap().open_channel(channel_id).await.unwrap();
-    
-        channel
-            .register_callback(DefaultChannelCallback)
-            .await
-            .unwrap();
+        if connection.is_some() {
 
-        return Some(channel);
+            let mut channel = connection.unwrap().open_channel(channel_id).await?;
+    
+            channel
+                .register_callback(DefaultChannelCallback)
+                .await?;
+                //.unwrap();
+
+            //return Some(channel);
+            Ok(channel)
+        } else {
+            Err("Connection was None".into())
+        }
     }
 
     pub async fn open_channel(&mut self) -> Arc<Option<Channel>> {
@@ -99,7 +94,7 @@ impl<'a> MQConnection<'a> {
     }
 
     //add queue method
-    //async fn add_queue(&mut self, queue_name: &str) {
+    //TODO: Add error handling (return result type here)
     pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) {
         //Declare queue
         let (queue_name, _, _) = channel
@@ -121,9 +116,9 @@ impl<'a> MQConnection<'a> {
 
 
 
+    //TODO: Add error handling (return result type here)
     pub async fn close_connections(&self) {
-        //self.channel.clone().expect("Channel was None").close().await.unwrap();
-        self.connection.clone().expect("Channel was None").close().await.unwrap();
+        self.connection.clone().expect("Connection was None").close().await.unwrap();
     }
 }
 
