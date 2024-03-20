@@ -26,7 +26,6 @@ const QUEUE_LIST: &[&str] = &["parse_queue"];
 
 pub struct MQConnection<'a> {
     connection: Option<Connection>,
-    //pub channel: Option<Channel>, 
     pub host: &'a str,
     pub port: u16,
     pub username: &'a str,
@@ -42,7 +41,6 @@ impl<'a> MQConnection<'a> {
     ) -> MQConnection<'a> {
         Self { 
             connection: None,
-            //channel: None,
             host,
             port,
             username,
@@ -50,63 +48,62 @@ impl<'a> MQConnection<'a> {
         }
 
     }
-    pub async fn open(&mut self) -> Arc<String> {
+    pub async fn open(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = Connection::open(&OpenConnectionArguments::new(
             self.host,
             self.port,
             self.username,
             self.password,
         ))
-        .await
-        .unwrap();
+        .await?;
 
         connection.register_callback(DefaultConnectionCallback)
-        .await
-        .unwrap();
-
-
-        //let channel = connection.open_channel(None).await.unwrap();
-        //channel
-        //    .register_callback(DefaultChannelCallback)
-        //    .await
-        //    .unwrap();
+        .await?;
 
         self.connection = Some(connection);
-        //self.channel = Some(channel);
 
         //TODO: Make better return
-        Arc::new("Success".to_string())
+        Ok(())
     }
 
-    //Consider changing return to Option or Result type
-    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Option<Channel> {
+    //TODO: Change return to Option or Result type
+    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
         let connection = self.connection.clone();
 
-        let mut channel = connection.unwrap().open_channel(channel_id).await.unwrap();
+        if connection.is_some() {
+
+            let mut channel = connection.unwrap().open_channel(channel_id).await?;
     
-        channel
-            .register_callback(DefaultChannelCallback)
-            .await
-            .unwrap();
+            channel
+                .register_callback(DefaultChannelCallback)
+                .await?;
 
-        return Some(channel);
-    }
-
-    pub async fn open_channel(&mut self) -> Arc<Option<Channel>> {
-       //return channel on connection struct in order to run queues on separate channels
-       ///Need to come up with a way to assign channel ID
-       return Arc::new(Some(self.connection.as_mut().unwrap().open_channel(Some(1)).await.unwrap()))
+            Ok(channel)
+        } else {
+            Err("Connection was None".into())
+        }
     }
 
     //add queue method
-    //async fn add_queue(&mut self, queue_name: &str) {
-    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) {
+    //TODO: Add error handling (return result type here)
+    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         //Declare queue
-        let (queue_name, _, _) = channel
-        .queue_declare(QueueDeclareArguments::durable_client_named(queue_name))
-            .await
-            .unwrap()
-            .unwrap();
+        let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
+            Ok(v) => {
+                if v.is_some() {
+                    v
+                } else {
+                   None 
+                }
+            },
+            Err(e) => {
+                eprintln!("mq::add_queue - Error occurred while declaring queue: {}", e);
+                None
+            } 
+        };
+        if option_args.is_none() {
+            return Err("Queue was None after declaring".into()); 
+        }
         
 
         channel
@@ -115,16 +112,37 @@ impl<'a> MQConnection<'a> {
                 exchange_name,
                 routing_key,
             ))
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
 
 
-    pub async fn close_connections(&self) {
-        //self.channel.clone().expect("Channel was None").close().await.unwrap();
-        self.connection.clone().expect("Channel was None").close().await.unwrap();
+    //TODO: Add error handling (return result type here)
+    pub async fn close_connections(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.connection.clone().expect("mq::close_connections - Connection was None while closing").close().await?;
+
+        Ok(())
     }
+}
+
+///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
+    let args = BasicPublishArguments::new(exchange_name, routing_key);
+
+    match channel
+        .basic_publish(BasicProperties::default(), content, args)
+        .await {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = format!("mq::publish_to_queue - Error occurred while publishing message: {}", e);
+                return Err(msg.into());
+            },
+        }
+
+    Ok(())
 }
 
 
@@ -315,12 +333,3 @@ pub trait Queue {
 
 
 
-pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
-    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
-    let args = BasicPublishArguments::new(exchange_name, routing_key);
-
-    channel
-        .basic_publish(BasicProperties::default(), content, args)
-        .await
-        .unwrap();
-}
