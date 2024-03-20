@@ -6,7 +6,8 @@ extern crate curl;
 extern crate serde;
 extern crate reqwest;
 use scraper::{Html, Selector};
-use std::{process, str};
+use tokio::sync::watch::error;
+use std::{env::args, fmt::Error, str};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
 use serde_json;
@@ -119,7 +120,8 @@ use curl::easy::Easy;
 
     
 
-    pub fn scrape(url: &str) -> std::io::Result<String> {
+    //pub fn scrape(url: &str) -> std::io::Result<String> {
+    pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     
         //Instantiate Easy instance for scraping
         let mut easy = Easy::new();
@@ -131,18 +133,29 @@ use curl::easy::Easy;
     
         //Need to make this more reproducible (also input symbol)
         //TODO: build request url dynamically using format!
-        easy.url(url).unwrap();
+        //easy.url(url).unwrap();
+        match easy.url(url) {
+            Ok(_) => (),
+            Err(e) => {
+                let msg = format!("options_scraper::scrape: error while running easy.url: {}", e);
+                println!("{}", msg);
+                return Err(msg.into());
+            },
+        };
         //Scope declared here in order to transfer ownership of stringed back to main function
         {
             let mut transfer = easy.transfer();
-            transfer.write_function(|data|{
-                let stringed_bytes = match str::from_utf8(data) {
+            match transfer.write_function(|data|{
+
+                let stringed_bytes = match str::from_utf8(data).map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("options_scraper::scrape: Error while reading scraped bytes to string {}", e))
+                }) {
                     Ok(stringed) => stringed,
                     Err(e) => {
-                        println!("Stringing bytes failed!");
-                        println!("{}", e);
+                        let msg = format!("options_scraper::scrape: error while stringing bytes within transfer.write_function: {}", e);
                         //Handle error below
-                        panic!("{}", e);
+                        println!("{}", msg);
+                        ""
                     },
                 };
     
@@ -150,15 +163,46 @@ use curl::easy::Easy;
     
                 
                 Ok(data.len())
-            }).unwrap();
-            transfer.perform().unwrap();
+            }) {
+                Ok(_) => (),
+                Err(e) => {
+                    let msg = format!("options_scraper::scrape: error while running transfer.write_function: {}", e);
+                    println!("{}", msg);
+                    return Err(msg.into());
+                },
+            }
+            //transfer.perform().unwrap();
+            match transfer.perform() {
+                Ok(_) => (),
+                Err(e) => {
+                    println!("{}", e);
+                    let msg = format!("options_scraper::scrape: error while running transfer.perform: {}", e);
+                    return Err(msg.into());
+                },
+            }
     
         }
 
         //process_bytes here
-        let ts = process_bytes(stringed);
+        let ts = match process_bytes(stringed) {
+            Ok(x) => x,
+            Err(e) => {
+                println!("{}", e);
+                return Err(e);
+            },
+        };
         
-        let serialized = serde_json::to_string(&ts).unwrap();
+        //let serialized = serde_json::to_string(&ts).unwrap();
+
+        let serialized = match serde_json::to_string(&ts) {
+            Ok(x) => x,
+            Err(_) => {
+                //Handle error
+                let msg = format!("options_scraper::scrape: error on json serialization");
+                println!("{}", "error on serialization");
+                return Err("".to_string().into());
+            },
+        };
     
         Ok(serialized)
         
@@ -168,22 +212,28 @@ use curl::easy::Easy;
         //TODO: Build url dynamically here:
         let resp = match reqwest::get(url).await {
             Ok(x) => x,
-            Err(_) => {
-                println!("{}", "error on random request");
-                process::exit(0x0100);
+            Err(e) => {
+                let msg = format!("options_scraper::async_scrape: error on reqwest to url: {} - {}", url, e); 
+                println!("{}", msg);
+                //Handle error
+                return Err(msg.into());
             },
         };
     
     
         let text = resp.text().await?;
-    
-        //TODO: Call process_bytes here
-        let ts = process_bytes(text);
+   
+        let ts = match process_bytes(text) {
+            Ok(x) => x,
+            Err(e) => {
+                //Handle error
+                return Err(e);
+            },
+        };
         Ok(ts)
     }
-        
     
-    fn process_bytes(stringed: String) -> TimeSeries {
+    fn process_bytes(stringed: String) -> Result<TimeSeries, Box<dyn std::error::Error>> {
         //Instantiate list for storing parsed data
         let mut scraped_elements = Vec::new();
         let mut contracts:Vec<UnparsedContract> = Vec::new();
@@ -191,7 +241,15 @@ use curl::easy::Easy;
         // parsing block
         let dom = Html::parse_document(stringed.as_str());
     
-        let td_selector = Selector::parse(r#"table > tbody > tr > td"#).unwrap();
+        //let td_selector = Selector::parse(r#"table > tbody > tr > td"#).unwrap();
+        let td_selector = match Selector::parse(r#"table > tbody > tr > td"#) {
+            Ok(x) => x,
+            Err(e) => {
+                let msg = format!("options_scraper::process_bytes: error while parsing td selector: {} ", e);
+                println!("{}", msg);
+                return Err(msg.into());
+            },
+        };
     
         for element in dom.select(&td_selector) {
                 scraped_elements.push(element.inner_html());
@@ -220,8 +278,22 @@ use curl::easy::Easy;
     
             //dynamically parsing html tags still present within the <td> tags
             let fragment = Html::parse_fragment(element.as_str()); 
-            let a_selector = Selector::parse("a").unwrap();
-            let span_selector = Selector::parse("span").unwrap();
+            let a_selector = match Selector::parse("a") {
+                Ok(x) => x,
+                Err(e) => {
+                    let msg = format!("options_scraper::process_bytes: error while parsing <a> selector: {} ", e);
+                    println!("{}", msg);
+                    return Err(msg.into());
+                },
+            };
+            let span_selector = match Selector::parse("span") {
+                Ok(x) => x,
+                Err(e) => {
+                    let msg = format!("options_scraper::process_bytes: error while parsing <span> selector: {} ", e);
+                    println!("{}", msg);
+                    return Err(msg.into());
+                },
+            };
             //Select out span + a elements
             let a = fragment.select(&a_selector).next().ok_or("Nil");
             let span = fragment.select(&span_selector).next().ok_or("Nil");
@@ -248,7 +320,7 @@ use curl::easy::Easy;
             count += 1;
         } 
         
-        TimeSeries{
+        Ok(TimeSeries{
             data: contracts,
-        }
+        })
     }

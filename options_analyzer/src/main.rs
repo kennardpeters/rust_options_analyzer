@@ -36,17 +36,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new(queue_name, routing_key, exchange_name, tx.clone())));
 
     let mut mq_connection_p = mq_connection.clone();
-    //TODO: add error handling here
     match mq_connection_p.lock().await.open().await {
         Ok(_) => {}
         Err(e) => {
-            println!("Error while opening main level connection to rabbitmq: {}", e);
+            eprintln!("main: Error while opening connection to rabbitmq: {}", e);
             process::exit(1);
         }
     }
-    let mut channel = Some(mq_connection_p.lock().await.add_channel(Some(3)).await.unwrap());
+    //Block below needed? 
+    let mut channel = match mq_connection_p.lock().await.add_channel(Some(3)).await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            eprintln!("main: Error occurred while adding channel 3: {}", e);
+            process::exit(1);
+        }
+    };
     //add queue
     mq_connection_p.lock().await.add_queue(channel.as_mut().unwrap(), "parsing_queue", routing_key, exchange_name).await;
+    //
     
     //TODO: Convert this to another form of input (Cmd line arg or csv) 
     let content = String::from(
@@ -90,11 +97,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let routing_key = "amqprs.example";
         let exchange_name = "amq.direct";
         let mut mq_connection_ce = mq_connection_ce.lock().await;
-        //TODO: Add error handling here
         match mq_connection_ce.open().await {
             Ok(_) => {},
             Err(e) => {
-                eprintln!("Error occurred while opening connection: {}", e);
+                eprintln!("main: error occurred while opening connection in example thread: {}", e);
                 process::exit(1);
             } 
         }
@@ -103,15 +109,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &queue_name,
             "example_basic_pub_sub"
         );
-        //let mut channel = Some(mq_connection_ce.add_channel(Some(1)).await.unwrap());
-        let mut channel = match mq_connection_ce.add_channel(Some(1)).await {
+        let channel_id = Some(1);
+        let mut channel = match mq_connection_ce.add_channel(channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
-                eprintln!("Error occurred while adding channel: {}", e);
+                let msg = format!("main: error occurred while adding channel w/ id: {} in example thread: {}", channel_id.unwrap(), e);
+                eprintln!("{}", msg);
                 process::exit(1);
             }
         };
-        let _ = mq_connection_ce.add_queue(channel.as_mut().unwrap(), "amqprs.examples.basic", routing_key, exchange_name).await;
+        let queue_name = "amqprs.examples.basic";
+        let _ = match mq_connection_ce.add_queue(channel.as_mut().unwrap(), queue_name, routing_key, exchange_name).await {
+            Ok(_) => {},
+            Err(e) => {
+                let msg = format!("main: error occurred while adding queue: {} in example thread: {}", queue_name, e);
+                eprintln!("{}", msg);
+                process::exit(1);
+            }
+        };
         channel.as_mut().unwrap() 
         .basic_consume(mq::ExampleConsumer::new(args.no_ack), args)
         .await
@@ -124,26 +139,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mq_connection_c = mq_connection.clone();
     tokio::spawn(async move {
         let mut mq_connection_c = mq_connection_c.lock().await;
-        //TODO: Add error handling here (Possibly overload is_err to return error message)
         match mq_connection_c.open().await {
             Ok(_) => {},
             Err(e) => {
-                eprintln!("Error occurred while opening connection: {}", e);
+                eprintln!("main: error occurred while opening connection in parsing thread: {}", e);
                 process::exit(1);
             }
         };
-        //let mut channel = Some(mq_connection_c.add_channel(Some(2)).await.unwrap());
-        let mut channel = match mq_connection_c.add_channel(Some(2)).await {
+        let channel_id = Some(2);
+        let mut channel = match mq_connection_c.add_channel(channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
-                eprintln!("Error occurred while adding channel: {}", e);
+                eprintln!("main: Error occurred while adding channel w/ id {} in parsing thread: {}", channel_id.unwrap(), e);
                 process::exit(1);
             }
         };
 
-        let _ = mq_connection_c.add_queue(channel.as_mut().unwrap(), "parsing_queue", "parsing_queue", "amq.direct").await;
+        let queue_name = "parsing_queue";
+
+        let _ = match mq_connection_c.add_queue(channel.as_mut().unwrap(), queue_name, "parsing_queue", "amq.direct").await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
+                process::exit(1);
+            }
+        };
         let parsing_queue = parsing_queue.clone();
-        parsing_queue.lock().await.process_queue(channel.as_mut().unwrap()).await;
+        match parsing_queue.lock().await.process_queue(channel.as_mut().unwrap()).await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("main: Error occurred while ParsingQueue::processing queue: {}", e);
+                process::exit(1);
+            }
+        };
 
 
     });
@@ -176,11 +204,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //close connection after publishing TODO: possibly move to end?
     match signal::ctrl_c().await {
             Ok(()) => {
-                mq_connection_p.lock().await.close_connections().await; 
+                match mq_connection_p.lock().await.close_connections().await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        eprintln!("main: Error occurred while closing connections: {}", e);
+                        process::exit(1);
+                    }
+                }
             },
             Err(err) => {
                 eprint!("Unable to listen for shutdown signal: {}", err);
-                mq_connection_p.lock().await.close_connections().await; 
+                match mq_connection_p.lock().await.close_connections().await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        eprintln!("main: Error occurred while closing connections: {}", e);
+                        process::exit(1);
+                    }
+                }
             }
     }
     process::exit(0);

@@ -58,42 +58,42 @@ impl Contract {
         self.strike = match unparsed.strike.parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Strike {} caused the following error: {:?}", unparsed.strike, e);
+                println!("types.Contract::parse: Parsing Strike {} caused the following error: {:?}", unparsed.strike, e);
                 0.0
             }
         };
         self.last_price = match unparsed.last_price.parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Last_price {} caused the following error: {:?}", unparsed.last_price, e);
+                println!("types.Contract::parse: Parsing Last_price {} caused the following error: {:?}", unparsed.last_price, e);
                 0.0
             }
         };
         self.bid = match unparsed.bid.parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Bid {} caused the following error: {:?}", unparsed.bid, e);
+                println!("types.Contract::parse: Parsing Bid {} caused the following error: {:?}", unparsed.bid, e);
                 0.0
             }
         };
         self.ask = match unparsed.ask.parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Ask {} caused the following error: {:?}", unparsed.ask, e);
+                println!("types.Contract::parse: Parsing Ask {} caused the following error: {:?}", unparsed.ask, e);
                 0.0
             }
         };
         self.change = match unparsed.change.replace("<!-- -->", "").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing change {} caused the following error: {:?}", unparsed.change, e);
+                println!("types.Contract::parse: Parsing change {} caused the following error: {:?}", unparsed.change, e);
                 0.0
             }
         };
         self.percent_change = match unparsed.percent_change.replace("%", "").replace("<!-- -->", "").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Percent change {} caused the following error: {:?}", unparsed.percent_change, e);
+                println!("types.Contract::parse: Parsing Percent change {} caused the following error: {:?}", unparsed.percent_change, e);
                 0.0
             }
         };
@@ -101,21 +101,21 @@ impl Contract {
         self.volume = match volume.parse::<i64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Open_interest {} caused the following error: {:?}",unparsed.open_interest, e);
+                println!("types.Contract::parse: Parsing Open_interest {} caused the following error: {:?}",unparsed.open_interest, e);
                 0
             }
         };
         self.open_interest = match unparsed.open_interest.parse::<i64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Open_interest {} caused the following error: {:?}", unparsed.open_interest, e);
+                println!("types.Contract::parse: Parsing Open_interest {} caused the following error: {:?}", unparsed.open_interest, e);
                 0
             }
         };
         self.implied_volatility = match unparsed.implied_volatility.replace("%", "").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("Parsing Implied_volatility {} caused the following error: {:?}", unparsed.implied_volatility, e);
+                println!("types.Contract::parse: Parsing Implied_volatility {} caused the following error: {:?}", unparsed.implied_volatility, e);
                 0.0
             }
         };

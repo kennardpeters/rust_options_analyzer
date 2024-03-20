@@ -67,7 +67,6 @@ impl<'a> MQConnection<'a> {
     }
 
     //TODO: Change return to Option or Result type
-    //pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Option<Channel> {
     pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
         let connection = self.connection.clone();
 
@@ -78,30 +77,33 @@ impl<'a> MQConnection<'a> {
             channel
                 .register_callback(DefaultChannelCallback)
                 .await?;
-                //.unwrap();
 
-            //return Some(channel);
             Ok(channel)
         } else {
             Err("Connection was None".into())
         }
     }
 
-    pub async fn open_channel(&mut self) -> Arc<Option<Channel>> {
-       //return channel on connection struct in order to run queues on separate channels
-       ///Need to come up with a way to assign channel ID
-       return Arc::new(Some(self.connection.as_mut().unwrap().open_channel(Some(1)).await.unwrap()))
-    }
-
     //add queue method
     //TODO: Add error handling (return result type here)
-    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) {
+    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         //Declare queue
-        let (queue_name, _, _) = channel
-        .queue_declare(QueueDeclareArguments::durable_client_named(queue_name))
-            .await
-            .unwrap()
-            .unwrap();
+        let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
+            Ok(v) => {
+                if v.is_some() {
+                    v
+                } else {
+                   None 
+                }
+            },
+            Err(e) => {
+                eprintln!("mq::add_queue - Error occurred while declaring queue: {}", e);
+                None
+            } 
+        };
+        if option_args.is_none() {
+            return Err("Queue was None after declaring".into()); 
+        }
         
 
         channel
@@ -110,16 +112,37 @@ impl<'a> MQConnection<'a> {
                 exchange_name,
                 routing_key,
             ))
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
 
 
     //TODO: Add error handling (return result type here)
-    pub async fn close_connections(&self) {
-        self.connection.clone().expect("Connection was None").close().await.unwrap();
+    pub async fn close_connections(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.connection.clone().expect("mq::close_connections - Connection was None while closing").close().await?;
+
+        Ok(())
     }
+}
+
+///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
+    let args = BasicPublishArguments::new(exchange_name, routing_key);
+
+    match channel
+        .basic_publish(BasicProperties::default(), content, args)
+        .await {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = format!("mq::publish_to_queue - Error occurred while publishing message: {}", e);
+                return Err(msg.into());
+            },
+        }
+
+    Ok(())
 }
 
 
@@ -310,12 +333,3 @@ pub trait Queue {
 
 
 
-pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) {
-    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
-    let args = BasicPublishArguments::new(exchange_name, routing_key);
-
-    channel
-        .basic_publish(BasicProperties::default(), content, args)
-        .await
-        .unwrap();
-}

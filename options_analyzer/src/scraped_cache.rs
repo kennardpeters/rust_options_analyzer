@@ -6,8 +6,6 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use crate::types::{Contract, Responder};
 use tokio::sync::mpsc;
-//use tokio::sync::Mutex;
-//use std::sync::Arc;
 
 
 #[derive(Debug)]
@@ -54,12 +52,6 @@ impl ScrapedCache {
         match self.cache.get(key) { //.clone()
             None => None,
             Some(value) => Some(value),
-            //{
-            //    //Seems sketchy but we'll see
-            //    let mut val = Contract::new();
-            //    value.clone_into(&mut &val); //..clone()
-            //    Some(val)
-            //},
         }
     }
     pub async fn set(&mut self, key: String, value: Contract) {
