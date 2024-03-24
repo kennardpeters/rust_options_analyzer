@@ -57,11 +57,6 @@ impl<'a> ParsingQueue<'a> {
 
         self.parsing_consumer = Some(ParsingConsumer::new(args.no_ack, self.tx.clone()));
 
-        //Possible declare a new basic_consume_rx(args) 
-        //let consumer_tag = channel
-        //    .basic_consume(self.parsing_consumer.clone().unwrap(), args)
-        //    .await?;
-
         //consuming behavior defined here
         let (ctag, mut messages_rx) = channel.basic_consume_rx(args.clone()).await?;
         while let Some(deliver) = messages_rx.recv().await {
@@ -76,7 +71,7 @@ impl<'a> ParsingQueue<'a> {
            let stringed_bytes = match str::from_utf8(&content) {
                Ok(stringed) => stringed,
                Err(e) => {
-                   let msg = format!("parsing_queue.AsyncConsumer.consume - stringing content bytes failed {}", e);
+                   let msg = format!("parsing_queue::process_queue - stringing content bytes failed {}", e);
                    println!("{}", msg);
                    ""
                },
@@ -105,6 +100,7 @@ impl<'a> ParsingQueue<'a> {
                }
 
            } else {
+                //main consumer logic to be retried later
                 self.process_func(pub_channel, unserialized_content).await?;
 
                 let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
@@ -114,17 +110,15 @@ impl<'a> ParsingQueue<'a> {
                     Err(e) => {
                         let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while acking message: {}", e);
                         println!("{}", msg);
-                         //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
                     },
                 };
-                //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
 
            }
         }
 
         if let Err(e) = channel.basic_cancel(BasicCancelArguments::new(&ctag)).await {
-                let msg = format!("parsing_queue::process_queue - Error occurred while cancelling consumer: {}", e);
-                println!("{}", msg);
+            let msg = format!("parsing_queue::process_queue - Error occurred while cancelling consumer: {}", e);
+            println!("{}", msg);
         }
 
         dbg!(ctag);
@@ -216,7 +210,8 @@ impl<'a> Queue for ParsingQueue<'a> {
     
 }
 
-#[derive(Clone)] //Copy
+//Deprecated
+#[derive(Clone)] 
 struct ParsingConsumer {
     no_ack: bool,
     tx: Sender<Command>,

@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let queue_name = "parsing_queue";
 
-        //Add queue to background thread (Necessary?)
+        //Add queue to background thread 
         let _ = match mq_connection_c.add_queue(sub_channel.as_mut().unwrap(), queue_name, parsing_routing_key, "amq.direct").await {
             Ok(_) => {},
             Err(e) => {
@@ -205,8 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mq::publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, parsing_routing_key, content).await?;
     println!("Item Published! from main");
-
-
+    
     //let future = async {
 
         // Define a periodic interval
