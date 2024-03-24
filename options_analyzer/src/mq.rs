@@ -48,6 +48,9 @@ impl<'a> MQConnection<'a> {
         }
 
     }
+
+    //open method for opening a connection to the mq server based on the host, port, username, and
+    //password passed into the mq struct
     pub async fn open(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = Connection::open(&OpenConnectionArguments::new(
             self.host,
@@ -66,6 +69,7 @@ impl<'a> MQConnection<'a> {
         Ok(())
     }
 
+    //add channel method for adding a channel to an mq connection and returning the new channel
     pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
         let connection = self.connection.clone();
 
@@ -83,7 +87,7 @@ impl<'a> MQConnection<'a> {
         }
     }
 
-    //add queue method
+    //add queue method for adding a queue to the current channel
     pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         //Declare queue
         let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
@@ -114,7 +118,8 @@ impl<'a> MQConnection<'a> {
 
         Ok(())
     }
-
+    
+    //close_connections closes all connections to the MQ server
     pub async fn close_connections(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.connection.clone().expect("mq::close_connections - Connection was None while closing").close().await?;
 

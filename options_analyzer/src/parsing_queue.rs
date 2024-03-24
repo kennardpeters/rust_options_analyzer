@@ -151,6 +151,7 @@ impl<'a> ParsingQueue<'a> {
             let (resp_tx, resp_rx) = oneshot::channel();
             println!("Contract: {:?}\n", i.clone());
             let contract = Contract::new_from_unparsed(i);
+            let next_key = contract.contract_name.clone();
             let command = Command::Set{
                 key: contract.contract_name.clone(),
                 value: contract,
@@ -173,21 +174,21 @@ impl<'a> ParsingQueue<'a> {
                     Err(()) 
                 },
             };
+            let e_content = String::from(
+                format!(
+                    r#"
+                        {{
+                            "publisher": "parsing",
+                            "key": {:?}
+                        }}
+                    "#,
+                    next_key 
+                )
+            ).into_bytes();
+            publish_to_queue(pub_channel, "amq.direct", "amqprs.example", e_content).await;
             //TODO: remove after verfication on separate queue
             dbg!(resp);
         }
-
-        //Wait until channel logic is fixed to run the commented out code below
-        let e_content = String::from(
-            r#"
-                {
-                    "publisher": "parsing",
-                    "data": "Hello, from Parsing Queue"
-                }
-            "#,
-        ).into_bytes();
-        //Insert into next queue (need to find channel based on queue name and send it through that channel)
-        publish_to_queue(pub_channel, "amq.direct", "amqprs.example", e_content).await;
 
         Ok(())
     }

@@ -2,14 +2,14 @@
 use core::time;
 use std::{borrow::{Borrow, BorrowMut}, process, sync::{Arc, Mutex}};
 
-use tokio::time::{interval, Duration};
+use tokio::{sync::oneshot, time::{interval, Duration}};
 use mq::MQConnection;
 use parsing_queue::ParsingQueue;
 use tokio::signal;
 use tokio::sync::{mpsc, Notify};
 use crate::scraped_cache::ScrapedCache;
 use serde_json::Value;
-use amqprs::channel::BasicCancelArguments;
+use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
 
 
 pub mod options_scraper;
@@ -144,6 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //Example queue thread
     let mut mq_connection_ce = mq_connection.clone();
+    let txe = tx.clone();
     tokio::spawn(async move {
         let e_routing_key = "amqprs.example";
         let exchange_name = "amq.direct";
@@ -192,6 +193,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let e_content = msg.content.unwrap();
             let unserialized_content: Value = serde_json::from_slice(&e_content).unwrap();
             println!("Received: {:?}", unserialized_content);
+
+            if unserialized_content.is_null() || unserialized_content["key"].is_null() {
+                let args = BasicAckArguments::new(msg.deliver.unwrap().delivery_tag(), false);
+                if let Err(e) = sub_channel.as_mut().unwrap().basic_ack(args).await {
+                    let msg = format!("main: error occurred while acking message from Example Queue: {}", e);
+                    eprintln!("{}", msg);
+                    process::exit(1);
+                }
+            } else {
+
+                let (resp_tx, resp_rx) = oneshot::channel();
+
+                let contract_name = unserialized_content["key"].to_string().replace("\"", "");
+
+                let command = scraped_cache::Command::Get{
+                    key: contract_name.clone(),
+                    resp: resp_tx,
+                };
+                match txe.send(command).await {
+                    Ok(val) => {
+
+
+                    },
+                    Err(e) => {
+                        let msg = format!("main - Error occurred while sending request for contract to cache: {}", e);
+                        println!("{}", msg);
+                    },
+                };
+                let resp = match resp_rx.await {
+                    Ok(x) => x,
+                    Err(e) => {
+                        let msg = format!("main::process_func - Error occurred while receiving result of receiveing contract from cache: {}", e);
+                        println!("{}", msg);
+                        Err(()) 
+                    },
+                };
+
+                println!("Received: {:?}", resp);
+
+                let args = BasicAckArguments::new(msg.deliver.unwrap().delivery_tag(), false);
+                if let Err(e) = sub_channel.as_mut().unwrap().basic_ack(args).await {
+                    let msg = format!("main: error occurred while acking message from Example Queue: {}", e);
+                    eprintln!("{}", msg);
+                    process::exit(1);
+                }
+
+            }
+
         }
         println!("End of while loop on Example Thread");
 
