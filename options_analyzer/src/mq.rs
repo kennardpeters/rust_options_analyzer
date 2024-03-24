@@ -117,9 +117,6 @@ impl<'a> MQConnection<'a> {
         Ok(())
     }
 
-
-
-    //TODO: Add error handling (return result type here)
     pub async fn close_connections(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.connection.clone().expect("mq::close_connections - Connection was None while closing").close().await?;
 
