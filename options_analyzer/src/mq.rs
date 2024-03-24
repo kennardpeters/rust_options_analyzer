@@ -66,7 +66,6 @@ impl<'a> MQConnection<'a> {
         Ok(())
     }
 
-    //TODO: Change return to Option or Result type
     pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
         let connection = self.connection.clone();
 
@@ -80,12 +79,11 @@ impl<'a> MQConnection<'a> {
 
             Ok(channel)
         } else {
-            Err("Connection was None".into())
+            Err("mq::add_channel: Connection was None".into())
         }
     }
 
     //add queue method
-    //TODO: Add error handling (return result type here)
     pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         //Declare queue
         let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
@@ -102,7 +100,7 @@ impl<'a> MQConnection<'a> {
             } 
         };
         if option_args.is_none() {
-            return Err("Queue was None after declaring".into()); 
+            return Err("mq::add_queue - Queue was None after declaring".into()); 
         }
         
 

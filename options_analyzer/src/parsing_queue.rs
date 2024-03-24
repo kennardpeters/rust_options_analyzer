@@ -5,7 +5,7 @@ extern crate async_trait;
 extern crate tokio;
 
 use amqprs::{
-    channel::{BasicAckArguments, BasicConsumeArguments, Channel, BasicCancelArguments},
+    channel::{BasicAckArguments, BasicCancelArguments, BasicConsumeArguments, Channel, ConsumerMessage},
     consumer::AsyncConsumer,
     BasicProperties,
     Deliver,
@@ -84,7 +84,7 @@ impl<'a> ParsingQueue<'a> {
            let unserialized_content: Value = match serde_json::from_str(&stringed_bytes) {
                Ok(unser_con) => unser_con,
                Err(e) => {
-                   let msg = format!("parsing_queue.AsyncConsumer.consume - unserializing content into json failed {}", e);
+                   let msg = format!("parsing_queue::process_queue - unserializing content into json failed {}", e);
                    println!("{}", msg);
                    //Panic!
                    Value::Null
@@ -92,108 +92,110 @@ impl<'a> ParsingQueue<'a> {
                }
            };
            println!("Unserialized Content: {:?}", unserialized_content);
-           if unserialized_content.is_null()|| unserialized_content["symbol"].is_null() {
+           if unserialized_content.is_null() || unserialized_content["symbol"].is_null() {
                println!("Symbol is null! for the following delivery: {}",unserialized_content);
                let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
 
                match channel.basic_ack(args).await {
                    Ok(_) => {}
                    Err(e) => {
-                       let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while acking message after null content: {}", e);
+                       let msg = format!("parsing_queue::process_queue - Error occurred while acking message after null content: {}", e);
                        println!("{}", msg);
                    },
                }
 
            } else {
-               let symbol = unserialized_content["symbol"].to_string().replace("\"", "");
-               println!("SYMBOL: {:?}\n", symbol);
-               let url = format!(r#"https://finance.yahoo.com/quote/{}/options?p={}"#, symbol, symbol);
-               println!("URL: {:?}\n", url);
-               let output_ts = match options_scraper::async_scrape(url.as_str()).await {
-                   Ok(x) => x,
-                   Err(e) => {
-                       let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while scraping: {}", e);
-                       println!("{}", msg);
-                       //Panic! here?
-                       options_scraper::TimeSeries {
-                           data: Vec::new(),
-                       }
-                   },
-               }; 
-           
+                self.process_func(pub_channel, unserialized_content).await?;
 
-               println!("Serialized Object LENGTH: {:?}", output_ts.data.len());
+                let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
 
-               //Parse out fields of time series objects from string => correct datatype
-               let mut contracts: Vec<Contract> = Vec::new();
-
-               for i in output_ts.data.iter() {
-                   let (resp_tx, resp_rx) = oneshot::channel();
-                   println!("Contract: {:?}\n", i.clone());
-                   let contract = Contract::new_from_unparsed(i);
-                   let command = Command::Set{
-                       key: contract.contract_name.clone(),
-                       value: contract,
-                       resp: resp_tx,
-                   };
-                   match self.tx.send(command).await {
-                       Ok(_) => {
-
-                       },
-                       Err(e) => {
-                           let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while sending contract to cache: {}", e);
-                           println!("{}", msg);
-                       },
-                   };
-                   let resp = match resp_rx.await {
-                       Ok(x) => x,
-                       Err(e) => {
-                           let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while receiving result of sending contract to cache: {}", e);
-                           println!("{}", msg);
-                           Err(()) 
-                       },
-                   };
-                   dbg!(resp);
-               }
-
-               //dbg!(contracts);
-
-
-               //Wait until channel logic is fixed to run the commented out code below
-               let e_content = String::from(
-                   r#"
-                       {
-                           "publisher": "parsing",
-                           "data": "Hello, from Parsing Queue"
-                       }
-                   "#,
-               ).into_bytes();
-               //Insert into next queue (need to find channel based on queue name and send it through that channel)
-               publish_to_queue(pub_channel, "amq.direct", "amqprs.example", e_content).await;
-
-               let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
-
-               match channel.basic_ack(args).await {
-                   Ok(_) => {}
-                   Err(e) => {
-                       let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while acking message: {}", e);
-                       println!("{}", msg);
-                        //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
-                   },
-               };
-               //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
+                match channel.basic_ack(args).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while acking message: {}", e);
+                        println!("{}", msg);
+                         //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
+                    },
+                };
+                //println!("DELIVERY TAG: {}", deliver.deliver.unwrap().delivery_tag())
 
            }
         }
 
         if let Err(e) = channel.basic_cancel(BasicCancelArguments::new(&ctag)).await {
-                let msg = format!("parsing_queue.AsyncConsumer.process_queue - Error occurred while cancelling consumer: {}", e);
+                let msg = format!("parsing_queue::process_queue - Error occurred while cancelling consumer: {}", e);
                 println!("{}", msg);
         }
 
         dbg!(ctag);
         Ok(())
         
+    }
+    
+    async fn process_func(&mut self, pub_channel: &mut Channel, unserialized_content: Value) -> Result<(), Box<dyn std::error::Error>> {
+
+        let symbol = unserialized_content["symbol"].to_string().replace("\"", "");
+        let url = format!(r#"https://finance.yahoo.com/quote/{}/options?p={}"#, symbol, symbol);
+        println!("URL: {:?}\n", url);
+
+        let output_ts = match options_scraper::async_scrape(url.as_str()).await {
+            Ok(x) => x,
+            Err(e) => {
+                let msg = format!("parsing_queue::process_func - Error occurred while scraping: {}", e);
+                println!("{}", msg);
+                //Return err here?
+                options_scraper::TimeSeries {
+                    data: Vec::new(),
+                }
+            },
+        }; 
+
+
+        println!("Serialized Object LENGTH: {:?}", output_ts.data.len());
+
+        for i in output_ts.data.iter() {
+            let (resp_tx, resp_rx) = oneshot::channel();
+            println!("Contract: {:?}\n", i.clone());
+            let contract = Contract::new_from_unparsed(i);
+            let command = Command::Set{
+                key: contract.contract_name.clone(),
+                value: contract,
+                resp: resp_tx,
+            };
+            match self.tx.send(command).await {
+                Ok(_) => {
+
+                },
+                Err(e) => {
+                    let msg = format!("parsing_queue::process_func - Error occurred while sending contract to cache: {}", e);
+                    println!("{}", msg);
+                },
+            };
+            let resp = match resp_rx.await {
+                Ok(x) => x,
+                Err(e) => {
+                    let msg = format!("parsing_queue::process_func - Error occurred while receiving result of sending contract to cache: {}", e);
+                    println!("{}", msg);
+                    Err(()) 
+                },
+            };
+            //TODO: remove after verfication on separate queue
+            dbg!(resp);
+        }
+
+        //Wait until channel logic is fixed to run the commented out code below
+        let e_content = String::from(
+            r#"
+                {
+                    "publisher": "parsing",
+                    "data": "Hello, from Parsing Queue"
+                }
+            "#,
+        ).into_bytes();
+        //Insert into next queue (need to find channel based on queue name and send it through that channel)
+        publish_to_queue(pub_channel, "amq.direct", "amqprs.example", e_content).await;
+
+        Ok(())
     }
 }
 

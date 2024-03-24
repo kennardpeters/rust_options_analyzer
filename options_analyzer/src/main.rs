@@ -22,20 +22,21 @@ pub use mq::Queue;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
-
     //"host.docker.internal" 
+    let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
+    println!("MQ Connection Created");
+
     //Caching channel (need to clone tx for each additional thread)
     let (tx, mut rx) = mpsc::channel(32);
 
     let mut contract_cache = Arc::new(tokio::sync::Mutex::new(scraped_cache::ScrapedCache::new(100)));
+    println!("Scraped Cache Created");
 
     let parsing_routing_key = "parsing_queue";
-    //let exchange_name = "";
     let exchange_name = "amq.direct";
-    //let queue_name = "amqprs.examples.basic"; //next queue
     let queue_name = "parsing_queue"; //next queue
     let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new(queue_name, parsing_routing_key, exchange_name, tx.clone())));
+    println!("Parsing Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
     match mq_connection_p.lock().await.open().await {
@@ -54,9 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             process::exit(1);
         }
     };
-    //add queue
-    //mq_connection_p.lock().await.add_queue(pub_channel.as_mut().unwrap(), "parsing_queue", routing_key, exchange_name).await;
-    //
+    println!("Pub Channel Created");
     
     //TODO: Convert this to another form of input (Cmd line arg or csv) 
     let content = String::from(
@@ -68,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         "#,
     ).into_bytes();
+    println!("content created");
 
 
     //Caching thread
@@ -93,90 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
        } 
     });
 
-
-    //Example queue thread
-    let mut mq_connection_ce = mq_connection.clone();
-    tokio::spawn(async move {
-        let e_routing_key = "amqprs.example";
-        let exchange_name = "amq.direct";
-        let e_queue_name = "amqprs.examples.basic";
-        let mut mq_connection_ce = mq_connection_ce.lock().await;
-        match mq_connection_ce.open().await {
-            Ok(_) => {},
-            Err(e) => {
-                eprintln!("main: error occurred while opening connection in example thread: {}", e);
-                process::exit(1);
-            } 
-        }
-
-        let e_channel_id = Some(1);
-        let mut sub_channel = match mq_connection_ce.add_channel(e_channel_id).await {
-            Ok(c) => Some(c),
-            Err(e) => {
-                let msg = format!("main: error occurred while adding channel w/ id: {} in example thread: {}", e_channel_id.unwrap(), e);
-                eprintln!("{}", msg);
-                process::exit(1);
-            }
-        };
-        let _ = match mq_connection_ce.add_queue(sub_channel.as_mut().unwrap(), e_queue_name, e_routing_key, exchange_name).await {
-            Ok(_) => {},
-            Err(e) => {
-                let msg = format!("main: error occurred while adding queue: {} in example thread: {}", e_queue_name, e);
-                eprintln!("{}", msg);
-                process::exit(1);
-            }
-        };
-
-        let e_args = amqprs::channel::BasicConsumeArguments::new(
-            &e_queue_name,
-            "example_basic_pub_sub"
-        ).manual_ack(false).finish();
-
-        //if let Err(e) = sub_channel.as_mut().unwrap() 
-        //    .basic_consume(mq::ExampleConsumer::new(args.no_ack), args)
-        //    .await
-        //{
-        //    eprintln!("main: error occurred while consuming channel: {}", e.to_string());
-        //    process::exit(1);
-        //}
-        //tokio::time::sleep(time::Duration::from_secs(5)).await;
-        // println!("Consuming stopped");
-
-        let (ectag, mut messages_rx) = match sub_channel.as_mut().unwrap() 
-        .basic_consume_rx(e_args).await {
-            
-            Ok(c) => c,
-            Err(e) => {
-                let msg = format!("main: error occurred while starting Example Consumer on channel: {}", e.to_string());
-                eprintln!("{}", msg);
-                process::exit(1);
-            }};
-        while let Some(msg) = messages_rx.recv().await {
-            let e_content = msg.content.unwrap();
-            let unserialized_content: Value = serde_json::from_slice(&e_content).unwrap();
-            println!("Received: {:?}", unserialized_content);
-        }
-
-        if let Err(e) = sub_channel.as_mut().unwrap().basic_cancel(BasicCancelArguments::new(&ectag)).await {
-            eprintln!("main: error occurred while canceling channel: {}", e.to_string());
-            process::exit(1);
-        }
-
-
-    });
-
     //Parsing queue thread
     let mut mq_connection_c = mq_connection.clone();
     tokio::spawn(async move {
         let mut mq_connection_c = mq_connection_c.lock().await;
-        //open connection from background thread
-        match mq_connection_c.open().await {
-            Ok(_) => {},
-            Err(e) => {
-                eprintln!("main: error occurred while opening connection in parsing thread: {}", e);
-                process::exit(1);
-            }
-        };
+
         //declare new channel for background thread
         let p_channel_id = Some(2);
         let mut sub_channel = match mq_connection_c.add_channel(p_channel_id).await {
@@ -186,16 +107,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         };
+        println!("Sub Channel Created on Parsing Thread");
 
         //declare new channel for publishing from background thread
-        //let p_channel_id = Some(2);
-        let mut pub_from_sub_channel = match mq_connection_c.add_channel(None).await {
+        let pfs_channel_id = Some(5);
+        let mut pub_from_sub_channel = match mq_connection_c.add_channel(pfs_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("main: Error occurred while adding channel w/ id {} in parsing thread: {}", p_channel_id.unwrap(), e);
                 process::exit(1);
             }
         };
+        println!("Pub from Sub Channel Created on Parsing Thread");
 
         let queue_name = "parsing_queue";
 
@@ -207,6 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         };
+        println!("Queue Created on Parsing Thread");
         let parsing_queue = parsing_queue.clone();
         match parsing_queue.lock().await.process_queue(sub_channel.as_mut().unwrap(), pub_from_sub_channel.as_mut().unwrap()).await {
             Ok(_) => {},
@@ -217,10 +141,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
     });
-    mq::publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, parsing_routing_key, content).await?;
 
-    //tokio::time::sleep(Duration::from_secs(5)).await;
-    
+    //Example queue thread
+    let mut mq_connection_ce = mq_connection.clone();
+    tokio::spawn(async move {
+        let e_routing_key = "amqprs.example";
+        let exchange_name = "amq.direct";
+        let e_queue_name = "amqprs.examples.basic";
+        let mut mq_connection_ce = mq_connection_ce.lock().await;
+
+        let e_channel_id = Some(1);
+        let mut sub_channel = match mq_connection_ce.add_channel(e_channel_id).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                let msg = format!("main: error occurred while adding channel w/ id: {} in example thread: {}", e_channel_id.unwrap(), e);
+                eprintln!("{}", msg);
+                process::exit(1);
+            }
+        };
+        println!("Sub Channel Created on Example Thread");
+        let _ = match mq_connection_ce.add_queue(sub_channel.as_mut().unwrap(), e_queue_name, e_routing_key, exchange_name).await {
+            Ok(_) => {},
+            Err(e) => {
+                let msg = format!("main: error occurred while adding queue: {} in example thread: {}", e_queue_name, e);
+                eprintln!("{}", msg);
+                process::exit(1);
+            }
+        };
+
+        println!("Queue Created on Example Thread");
+
+        let e_args = amqprs::channel::BasicConsumeArguments::new(
+            &e_queue_name,
+            "example_basic_pub_sub"
+        ).manual_ack(false).finish();
+
+        let (ectag, mut messages_rx) = match sub_channel.as_mut().unwrap() 
+        .basic_consume_rx(e_args).await {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("main: error occurred while starting Example Consumer on channel: {}", e.to_string());
+                eprintln!("{}", msg);
+                process::exit(1);
+            }
+        };
+
+        println!("Consumer Initiated on Example Thread");
+
+        while let Some(msg) = messages_rx.recv().await {
+            let e_content = msg.content.unwrap();
+            let unserialized_content: Value = serde_json::from_slice(&e_content).unwrap();
+            println!("Received: {:?}", unserialized_content);
+        }
+        println!("End of while loop on Example Thread");
+
+        if let Err(e) = sub_channel.as_mut().unwrap().basic_cancel(BasicCancelArguments::new(&ectag)).await {
+            eprintln!("main: error occurred while canceling channel: {}", e.to_string());
+            process::exit(1);
+        }
+
+
+    });
+
+    mq::publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, parsing_routing_key, content).await?;
+    println!("Item Published! from main");
+
 
     //let future = async {
 
