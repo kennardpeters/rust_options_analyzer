@@ -20,9 +20,24 @@ services:
       retries: 3
     volumes:
       - ~/.docker-conf/rabbitmq/data:/var/lib/rabbitmq/
-      - ~/.docker-conf/rabbigmq/log/:/var/log/rabbitmq/
+      - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq/
     networks:
       - rabbitmq_go_net
+  timescale:
+    container_name: timescale
+    image: timescale/timescaledb-ha:pg16-all
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    networks:
+      - rabbitmq_go_net
+    restart: unless-stopped
+
 
 networks:
   rabbitmq_go_net:
