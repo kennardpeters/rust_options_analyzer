@@ -17,6 +17,7 @@ pub mod parsing_queue;
 pub mod scraped_cache;
 pub mod mq;
 pub mod types;
+pub mod writing_queue;
 pub use mq::Queue;
 
 
@@ -32,11 +33,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut contract_cache = Arc::new(tokio::sync::Mutex::new(scraped_cache::ScrapedCache::new(100)));
     println!("Scraped Cache Created");
 
+    //Parsing Queue Declaration
     let parsing_routing_key = "parsing_queue";
     let exchange_name = "amq.direct";
     let queue_name = "parsing_queue"; //next queue
     let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new(queue_name, parsing_routing_key, exchange_name, tx.clone())));
     println!("Parsing Queue Created");
+
+    //Writing Queue Declaration
+    let writing_routing_key = "writing_queue";
+    let w_exchange_name = "amq.direct";
+    let queue_name = "writing_queue";
+    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, tx.clone())));
+    println!("Writing Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
     match mq_connection_p.lock().await.open().await {
@@ -140,6 +149,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+    });
+    //Writing queue thread
+    let mut mq_connection_w = mq_connection.clone();
+    tokio::spawn(async move {
+        let w_exchange_name = "amq.direct";
+        let writing_routing_key = writing_routing_key.clone(); 
+        let queue_name = "writing_queue";
+
+        let mut mq_connection_w = mq_connection_w.lock().await;
+
+        //declare new channel for background thread
+        let w_channel_id = Some(6);
+        let mut sub_channel = match mq_connection_w.add_channel(w_channel_id).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("main: Error occurred while adding sub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
+                process::exit(1);
+            }
+        };
+        println!("sub Channel Created on Writing Thread");
+
+        //declare a new channel for publishing from background thread
+        let pfw_channel_id = Some(7);
+        let mut pub_channel = match mq_connection_w.add_channel(pfw_channel_id).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("main: Error occurred while adding pub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
+                process::exit(1);
+            }
+        };
+
+        let _ = match mq_connection_w.add_queue(sub_channel.as_mut().unwrap(), queue_name, writing_routing_key, w_exchange_name).await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
+                process::exit(1);
+            }
+        };
+        println!("Queue Created on Writing Thread");
+
+        let writing_queue = writing_queue.clone();
+        match writing_queue.lock().await.process_queue(sub_channel.as_mut().unwrap(), pub_channel.as_mut().unwrap()).await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("main: Error occurred while WritingQueue::processing queue: {}", e);
+                process::exit(1);
+            }
+        };
     });
 
     //Example queue thread

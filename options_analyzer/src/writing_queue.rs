@@ -1,6 +1,23 @@
 extern crate tokio;
+extern crate amqprs;
+extern crate serde_json;
+extern crate std;
+
+use crate::mq::Queue;
+use crate::types::Contract;
+use crate::scraped_cache::{ScrapedCache, Command};
 
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
+use std::str;
+
+use amqprs::{
+    channel::{BasicAckArguments, BasicConsumeArguments, Channel, ConsumerMessage, BasicCancelArguments},
+    consumer::AsyncConsumer,
+    BasicProperties,
+    Deliver,
+};
+use serde_json::Value;
 
 
 pub struct WritingQueue<'a> {
@@ -53,9 +70,9 @@ impl<'a> WritingQueue<'a> {
                 }
             };
             println!("Unserialized Content: {:?}", unserialized_content);
-            if unserialized_content.is_null() || unserialized_content["symbol"].is_null() {
-                println!("Symbol is null! for the following delivery: {}",unserialized_content);
-                let args = BasicAckArguments::new(deliver.delivery_tag(), false);
+            if unserialized_content.is_null() || unserialized_content["key"].is_null() {
+                println!("Key is null! for the following delivery: {}",unserialized_content);
+                let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
 
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
@@ -67,7 +84,7 @@ impl<'a> WritingQueue<'a> {
             } else {
                 //main consumer logic to be retried later
                 self.process_func(pub_channel, unserialized_content).await?;
-                self.tx.send(Command::Write(unserialized_content)).await?;
+                let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
                     Err(e) => {
@@ -89,10 +106,50 @@ impl<'a> WritingQueue<'a> {
     async fn process_func(&mut self, pub_channel: &mut Channel, unserialized_content: Value) -> Result<(), Box<dyn std::error::Error>> {
 
         //Grab a contract names from the queue item and pull them from cache
+        let contract_name = unserialized_content["key"].to_string().replace("\"", "");
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let command = Command::Get{
+            key: contract_name.clone(),
+            resp: resp_tx,
+        };
+        match self.tx.send(command).await {
+            Ok(_) => {},
+            Err(e) => {
+                let msg = format!("writing_queue::process_func - Error occurred while requesting contract from cache: {}", e);
+                println!("{}", msg);
+            },
+        };
+        let resp = match resp_rx.await {
+            Ok(x) => x,
+            Err(e) => {
+                let msg = format!("writing_queue::process_func - Error occurred while receiving contract from cache: {}", e);
+                println!("{}", msg);
+                Err(()) 
+            },
+        };
+        //TODO: Fix unwrapping
+        let contract = match resp {
+            Ok(x) => {
+                if x.is_some() {
+                    x.unwrap()
+                } else {
+                    x.unwrap()
+                }
+            },
+            Err(e) => {
+                let msg = format!("writing_queue::process_func - Error occurred while receiving contract from cache: {:?}", e);
+                println!("{}", msg);
+                Contract::new()
+            },
+        };
+
+
 
 
         //Write to the postgres database
         //insert sqlx code here
+
         
         //Insert into next queue
         
