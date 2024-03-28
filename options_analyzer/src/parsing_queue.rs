@@ -185,7 +185,7 @@ impl<'a> ParsingQueue<'a> {
                     next_key 
                 )
             ).into_bytes();
-            publish_to_queue(pub_channel, "amq.direct", "amqprs.example", e_content).await;
+            publish_to_queue(pub_channel, "amq.direct", "writing_queue", e_content).await;
             //TODO: remove after verfication on separate queue
             dbg!(resp);
         }
