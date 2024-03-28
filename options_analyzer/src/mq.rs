@@ -24,6 +24,7 @@ use crate::parsing_queue::{self, ParsingQueue};
 
 const QUEUE_LIST: &[&str] = &["parse_queue"];
 
+//MQConnection is a struct to handle storing and opening connections to the mq server
 pub struct MQConnection<'a> {
     connection: Option<Connection>,
     pub host: &'a str,
@@ -145,7 +146,48 @@ pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_ke
     Ok(())
 }
 
+//Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
+//TODO: Refactor this trait to new structure
+#[async_trait]
+pub trait Queue {
+    //Declare a new queue
+    //fn new()
 
+    fn queue_name(&self) -> &str;
+    //open new connection?
+    //register callback
+    //Open channel + defaultChannelCallback
+
+    //fn new(channel)
+    //declare the queue from the channel
+    //bind the queue to the exchange
+    //fn new(&mut self, queue_name: &str, channel: Channel, routing_key: &str, exchange_name: &str) -> Queue;
+
+    fn args(&self) -> BasicConsumeArguments;
+
+    //ProcessQueue()
+    //Start a consumer on channel?
+    //and run in the background
+    //async fn process_queue(&mut self);
+
+
+    //Consume func (Do we need this?
+    //async fn consume(
+    //    &mut self, 
+    //    channel: &Channel, 
+    //    deliver: Deliver, 
+    //    _basic_properties: BasicProperties, 
+    //    content: Vec<u8>
+    //);
+    //unserialize content
+    //Process func
+    //Insert into next queue
+}
+
+
+
+
+//Deprecated Struct to implement previous consumer pattern
 pub struct ExampleConsumer {
    no_ack: bool, 
 }
@@ -203,7 +245,7 @@ impl AsyncConsumer for ExampleConsumer {
     }
 }
 
-
+///publish_example is an example of how to publish and consume from rabbitmq using the amqprs library
 pub async fn publish_example() {
 
     tracing_subscriber::registry()
@@ -293,43 +335,4 @@ pub async fn publish_example() {
     channel.close().await.unwrap();
     connection.close().await.unwrap();
 }
-
-//Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
-#[async_trait]
-pub trait Queue {
-    //Declare a new queue
-    //fn new()
-
-    fn queue_name(&self) -> &str;
-    //open new connection?
-    //register callback
-    //Open channel + defaultChannelCallback
-
-    //fn new(channel)
-    //declare the queue from the channel
-    //bind the queue to the exchange
-    //fn new(&mut self, queue_name: &str, channel: Channel, routing_key: &str, exchange_name: &str) -> Queue;
-
-    fn args(&self) -> BasicConsumeArguments;
-
-    //ProcessQueue()
-    //Start a consumer on channel?
-    //and run in the background
-    //async fn process_queue(&mut self);
-
-
-    //Consume func (Do we need this?
-    //async fn consume(
-    //    &mut self, 
-    //    channel: &Channel, 
-    //    deliver: Deliver, 
-    //    _basic_properties: BasicProperties, 
-    //    content: Vec<u8>
-    //);
-    //unserialize content
-    //Process func
-    //Insert into next queue
-}
-
-
 

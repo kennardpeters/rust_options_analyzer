@@ -105,7 +105,7 @@ impl Contract {
                 0
             }
         };
-        self.open_interest = match unparsed.open_interest.parse::<i64>() {
+        self.open_interest = match unparsed.open_interest.replace(",", "").parse::<i64>() {
             Ok(v) => v,
             Err(e) => {
                 println!("types.Contract::parse: Parsing Open_interest {} caused the following error: {:?}", unparsed.open_interest, e);

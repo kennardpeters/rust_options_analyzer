@@ -99,7 +99,7 @@ impl<'a> WritingQueue<'a> {
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
                     Err(e) => {
-                        let msg = format!("writing_queue::process_queue - Error occurred while acking message after null content: {}", e);
+                        let msg = format!("writing_queue::process_queue - Error occurred while acking message after db insertion: {}", e);
                         println!("{}", msg);
                     },
                 };
@@ -158,9 +158,8 @@ impl<'a> WritingQueue<'a> {
 
         //Write to the postgres database
         //insert sqlx code here
-        //Pull out sqlx code into separate package
+        //TODO: Pull out sqlx code into separate crate 
         let pool = self.pool.lock().await.clone();
-                //RETURNING time
         let result = sqlx::query(
             r#"
                 INSERT INTO contracts
@@ -179,11 +178,9 @@ impl<'a> WritingQueue<'a> {
             .bind(contract.volume)
             .bind(contract.open_interest)
             .fetch_one(&pool).await;
-            //.execute(pool).await;
         match result {
             Ok(v) => {
                 println!("Successfully inserted into postgres!");
-                //dbg!(v);
             },
             Err(e) => {
                 let msg = format!("writing_queue::process_func - Error occurred while inserting into postgres: {}", e);
@@ -196,7 +193,7 @@ impl<'a> WritingQueue<'a> {
 
 
         
-        //Insert into next queue
+        //TODO: Insert into next queue once created
         
         Ok(())
     }
