@@ -34,6 +34,7 @@ pub struct MQConnection<'a> {
 }
 
 impl<'a> MQConnection<'a> {
+    //new method is a constructor for creating a new mq connection
     pub fn new(
         host: &'a str,
         port: u16,
@@ -184,6 +185,23 @@ pub trait Queue {
     //Insert into next queue
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_add_queue() {
+        //let mut mq = MQConnection::new("localhost", 5672, "guest", "guest").unwrap();
+        //mq.open().unwrap();
+        //let mut channel = mq.add_channel(None).unwrap();
+        //mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").unwrap();
+    }
+    
+    #[test]
+    fn test_publish_to_queue() {
+        //TODO:
+    }
+
+}
 
 
 

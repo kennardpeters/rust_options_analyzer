@@ -60,3 +60,20 @@ impl ScrapedCache {
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_get() {
+        //Create multiple threads to get multiple keys
+    }
+    
+    #[test]
+    fn test_set() {
+        //Create multiple threads to set/get multiple keys
+        //TODO:
+    }
+
+}
+
+
