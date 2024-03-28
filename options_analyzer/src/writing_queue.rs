@@ -2,14 +2,17 @@ extern crate tokio;
 extern crate amqprs;
 extern crate serde_json;
 extern crate std;
+extern crate sqlx;
 
 use crate::mq::Queue;
 use crate::types::Contract;
 use crate::scraped_cache::{ScrapedCache, Command};
+use sqlx::{Pool, Postgres, Row};
 
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use std::str;
+use std::sync::Arc;
 
 use amqprs::{
     channel::{BasicAckArguments, BasicConsumeArguments, Channel, ConsumerMessage, BasicCancelArguments},
@@ -24,15 +27,17 @@ pub struct WritingQueue<'a> {
     pub name: &'a str, //Current name of queue
     routing_key: &'a str, // queue name for publishing to the next queue
     exchange_name: &'a str, //Exchange name used for publishing to the next queue
+    pool: Arc<Mutex<Pool<Postgres>>>,
     tx: Sender<Command>, //use to communicate with caching thread
 }
 
 impl<'a> WritingQueue<'a> {
-    pub fn new(queue_name: &'a str, routing_key: &'a str, exchange_name: &'a str, tx: Sender<Command>) -> Self { 
+    pub fn new(queue_name: &'a str, routing_key: &'a str, exchange_name: &'a str, pool: Arc<Mutex<Pool<Postgres>>>, tx: Sender<Command>) -> Self { 
         Self {
             name: queue_name,
             routing_key,
             exchange_name,
+            pool,
             tx,
         }
     }
@@ -83,7 +88,13 @@ impl<'a> WritingQueue<'a> {
                 };
             } else {
                 //main consumer logic to be retried later
-                self.process_func(pub_channel, unserialized_content).await?;
+                match self.process_func(pub_channel, unserialized_content).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        let msg = format!("writing_queue::process_queue - Error occurred while processing message: {}", e);
+                        println!("{}", msg);
+                    },
+                };
                 let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
@@ -134,7 +145,8 @@ impl<'a> WritingQueue<'a> {
                 if x.is_some() {
                     x.unwrap()
                 } else {
-                    x.unwrap()
+                    println!("Unwrapped None! from Cache");
+                    return Err("Unwrapped None! from Cache".into());
                 }
             },
             Err(e) => {
@@ -144,11 +156,44 @@ impl<'a> WritingQueue<'a> {
             },
         };
 
-
-
-
         //Write to the postgres database
         //insert sqlx code here
+        //Pull out sqlx code into separate package
+        let pool = self.pool.lock().await.clone();
+                //RETURNING time
+        let result = sqlx::query(
+            r#"
+                INSERT INTO contracts
+                (time, contract_name, last_trade_date, strike, last_price, bid, ask, change, percent_change, volume, open_interest) Values (NOW(), $1, $2, $3, $4, $5, $6, $7,  $8, $9, $10)
+                Returning time
+            "#,
+        )
+            .bind(contract_name)
+            .bind(contract.last_trade_date)
+            .bind(contract.strike)
+            .bind(contract.last_price)
+            .bind(contract.bid)
+            .bind(contract.ask)
+            .bind(contract.change)
+            .bind(contract.percent_change)
+            .bind(contract.volume)
+            .bind(contract.open_interest)
+            .fetch_one(&pool).await;
+            //.execute(pool).await;
+        match result {
+            Ok(v) => {
+                println!("Successfully inserted into postgres!");
+                //dbg!(v);
+            },
+            Err(e) => {
+                let msg = format!("writing_queue::process_func - Error occurred while inserting into postgres: {}", e);
+                println!("{}", msg);
+            },
+        };
+
+
+
+
 
         
         //Insert into next queue

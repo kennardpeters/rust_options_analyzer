@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, Notify};
 use crate::scraped_cache::ScrapedCache;
 use serde_json::Value;
 use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
+use sqlx::postgres::PgPool;
 
 
 pub mod options_scraper;
@@ -26,6 +27,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //"host.docker.internal" 
     let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
     println!("MQ Connection Created");
+
+    // /scraped
+    let mut pool = match PgPool::connect("postgres://postgres:postgres@127.0.0.1:5444/scraped").await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("main: Error while connecting to postgres: {}", e);
+            process::exit(1);
+        }
+    };
+    let mut atomic_pool = Arc::new(tokio::sync::Mutex::new(pool.clone())); 
+    println!("DB Pool Created");
+
 
     //Caching channel (need to clone tx for each additional thread)
     let (tx, mut rx) = mpsc::channel(32);
@@ -44,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let writing_routing_key = "writing_queue";
     let w_exchange_name = "amq.direct";
     let queue_name = "writing_queue";
-    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, tx.clone())));
+    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, atomic_pool.clone() ,tx.clone())));
     println!("Writing Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
@@ -56,7 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     //Block below needed? 
-    let pub_channel_id = Some(3);
+    //let pub_channel_id = Some(3);
+    let pub_channel_id = None;
     let mut pub_channel = match mq_connection_p.lock().await.add_channel(pub_channel_id).await {
         Ok(c) => Some(c),
         Err(e) => {
@@ -108,7 +122,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut mq_connection_c = mq_connection_c.lock().await;
 
         //declare new channel for background thread
-        let p_channel_id = Some(2);
+        //let p_channel_id = Some(2);
+        let p_channel_id = None;
         let mut sub_channel = match mq_connection_c.add_channel(p_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -119,7 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Sub Channel Created on Parsing Thread");
 
         //declare new channel for publishing from background thread
-        let pfs_channel_id = Some(5);
+        //let pfs_channel_id = Some(5);
+        let pfs_channel_id = None;
         let mut pub_from_sub_channel = match mq_connection_c.add_channel(pfs_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -150,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
     });
+
     //Writing queue thread
     let mut mq_connection_w = mq_connection.clone();
     tokio::spawn(async move {
@@ -160,7 +177,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut mq_connection_w = mq_connection_w.lock().await;
 
         //declare new channel for background thread
-        let w_channel_id = Some(6);
+        //let w_channel_id = Some(6);
+        let w_channel_id = None;
         let mut sub_channel = match mq_connection_w.add_channel(w_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -171,7 +189,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("sub Channel Created on Writing Thread");
 
         //declare a new channel for publishing from background thread
-        let pfw_channel_id = Some(7);
+        //let pfw_channel_id = Some(7);
+        let pfw_channel_id = None;
         let mut pub_channel = match mq_connection_w.add_channel(pfw_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -208,7 +227,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let e_queue_name = "amqprs.examples.basic";
         let mut mq_connection_ce = mq_connection_ce.lock().await;
 
-        let e_channel_id = Some(1);
+        //let e_channel_id = Some(1);
+        let e_channel_id = None;
         let mut sub_channel = match mq_connection_ce.add_channel(e_channel_id).await {
             Ok(c) => Some(c),
             Err(e) => {
