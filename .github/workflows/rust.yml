@@ -20,13 +20,11 @@ jobs:
       run: docker compose build rabbitmq timescale
     - name: run db + rabbitmq for testing
       run: docker compose up rabbitmq timescale -d
-    - name: change dir to cargo
-      run: cd options_analyzer
     - name: Build
+      working-directory: ./options_analyzer
       run: cargo build --verbose
     - name: Run tests
+      working-directory: ./options_analyzer
       run: cargo test --verbose
-    - name: change dir to docker
-      run: cd ..
     - name: shutdown containers
       run: docker compose down
