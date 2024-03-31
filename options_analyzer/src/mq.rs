@@ -8,7 +8,12 @@ extern crate std;
 use amqprs::{
     callbacks::{DefaultChannelCallback, DefaultConnectionCallback}, channel::{
         BasicAckArguments, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
-    }, connection::{Connection, OpenConnectionArguments}, consumer::AsyncConsumer, AmqpChannelId, BasicProperties, Deliver
+    }, 
+    connection::{Connection, OpenConnectionArguments}, 
+    consumer::AsyncConsumer, 
+    AmqpChannelId, 
+    BasicProperties, 
+    Deliver
 };
 use tokio::time;
 use std::{borrow::BorrowMut, str, sync::Arc};
@@ -185,29 +190,180 @@ pub trait Queue {
     //Insert into next queue
 }
 
+//Requires RabbitMQ to be running
 #[cfg(test)]
 mod tests {
+    use amqprs::consumer::DefaultConsumer;
+
     use super::*;
-    #[test]
-    fn test_add_queue() {
-        //let mut mq = MQConnection::new("localhost", 5672, "guest", "guest").unwrap();
-        //mq.open().unwrap();
-        //let mut channel = mq.add_channel(None).unwrap();
-        //mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").unwrap();
+    #[tokio::test]
+    async fn test_add_queue() {
+        //Setup using the MQConnection struct
+        let mut mq = MQConnection::new("localhost", 5672, "guest", "guest");
+        let conn_result = match mq.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while opening connection: {}", e);
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        let mut channel = match mq.add_channel(Some(2)).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        
+
+        //Main function we are testing
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
+                return;
+            }
+        };
+        assert_eq!(res, ());
+
+
+        //verify that queue exists on channel/exchange
+        let mut client_channel = match mq.add_channel(None).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        // Attempt to declare the queue with passive option
+        let queue_name = "test_queue";
+        let client_args = QueueDeclareArguments::durable_client_named(queue_name).passive(true).finish();
+        let queue_res = match client_channel.queue_declare(client_args).await {
+            Ok(_) => println!("Queue {} exists", queue_name),
+            Err(e) => {
+                println!("Queue {} does not exist: {}", queue_name, e);
+            }
+        };
+        assert_eq!(queue_res, ());
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        channel.close().await.unwrap();
+        client_channel.close().await.unwrap();
+        mq.close_connections().await.unwrap();
+
+        
     }
     
-    #[test]
-    fn test_publish_to_queue() {
+    #[tokio::test]
+    async fn test_publish_to_queue() {
         //TODO:
+        let mut mq = MQConnection::new("localhost", 5672, "guest", "guest");
+
+        let conn_result = match mq.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while opening connection: {}", e);
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        let mut channel = match mq.add_channel(Some(2)).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        
+
+        //Main function we are testing
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
+                return;
+            }
+        };
+
+        let args = BasicConsumeArguments::new(
+            "test_queue",
+            "test_consumer_tag",
+        );
+
+        let test_content = String::from(
+            r#"
+                {
+                    "publisher": "cargo test",
+                    "data": "test_junk"
+                }
+            "#,
+        ).into_bytes();
+
+        let _consumer = match channel.basic_consume(TestConsumer::new(args.no_ack, test_content.clone()), args).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding consumer: {}", e);
+                return;
+            }
+        };
+
+        // publish message
+
+
+
+        let pub_result = publish_to_queue(&mut channel, "test_exchange", "test_routing_key", test_content).await.unwrap();
+        assert_eq!(pub_result, ());
+        //check if mq was published using a fake consumer
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        channel.close().await.unwrap();
+        mq.close_connections().await.unwrap();
     }
 
 }
 
+//Test Consumer used for mq testing
+pub struct TestConsumer {
+    no_ack: bool,
+    expected_content: Vec<u8>, 
+}
 
+impl TestConsumer {
+    pub fn new(no_ack: bool, expected_content: Vec<u8>) -> Self {
+        Self { 
+            no_ack, 
+            expected_content
+        }
+
+    }
+}
+
+#[async_trait]
+impl AsyncConsumer for TestConsumer {
+    async fn consume(
+        &mut self,
+        channel: &Channel,
+        deliver: Deliver,
+        _basic_properities: BasicProperties,
+        content: Vec<u8>,
+    ) {
+        assert_eq!(self.expected_content, content);
+
+        let args = BasicAckArguments::new(deliver.delivery_tag(), false);
+
+        channel.basic_ack(args).await.unwrap();
+
+    }
+}
 
 //Deprecated Struct to implement previous consumer pattern
 pub struct ExampleConsumer {
-   no_ack: bool, 
+   no_ack: bool,
 }
 
 impl ExampleConsumer {

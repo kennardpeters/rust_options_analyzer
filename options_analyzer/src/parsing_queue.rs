@@ -211,7 +211,23 @@ impl<'a> Queue for ParsingQueue<'a> {
     
 }
 
-//Deprecated
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_queue() -> Result<(), Box<dyn std::error::Error>> {
+        Err("Not implemented")?
+        // create an mq connection
+        // Possibly create/find a fake webpage to scrape
+        // create a cache
+        // create a queue
+        // create a queue item and push and send to the queue
+        // Verify the cache is updated with the data we scraped
+    }
+}
+
+//Deprecated Struct used for old consumer pattern
 #[derive(Clone)] 
 struct ParsingConsumer {
     no_ack: bool,

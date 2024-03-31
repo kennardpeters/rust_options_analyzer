@@ -198,3 +198,24 @@ impl<'a> WritingQueue<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_process() {
+        //Create an mq instance
+        //Create fake contract
+        //Instantiate cache
+        //Insert fake contract into cache
+        //Create a writing queue
+        //Process the queue
+        
+        //Verify the contract has been inserted into the db
+        //delete the fake contract from the db
+        //Insert into next queue
+    }
+}

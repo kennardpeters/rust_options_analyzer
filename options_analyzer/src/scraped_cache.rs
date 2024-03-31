@@ -33,6 +33,7 @@ impl ScrapedCache {
             cache
         }
     }
+
     //pub async fn process_command(&mut self, command: Command) {
     //    let (tx, mut rx) = mpsc::channel(1);
 
@@ -64,14 +65,16 @@ impl ScrapedCache {
 mod tests {
     use super::*;
     #[test]
-    fn test_get() {
+    fn test_get() -> Result<(), Box<dyn std::error::Error>> {
         //Create multiple threads to get multiple keys
+        Err("Not implemented")?
     }
     
     #[test]
-    fn test_set() {
+    fn test_set() -> Result<(), Box<dyn std::error::Error>> {
         //Create multiple threads to set/get multiple keys
         //TODO:
+        Err("Not implemented")?
     }
 
 }
