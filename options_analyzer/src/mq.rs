@@ -196,6 +196,9 @@ mod tests {
     use amqprs::consumer::DefaultConsumer;
 
     use super::*;
+
+    use reqwest::Client;
+    use serde_json::Value;
     #[tokio::test]
     async fn test_add_queue() {
         //Setup using the MQConnection struct
@@ -250,6 +253,25 @@ mod tests {
         assert_eq!(queue_res, ());
 
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        let client = Client::new();
+        let url = format!("http://localhost:15672/api/queues/{}/bindings", queue_name);
+
+        // Verify that the queue exists
+        let res = client.get(&url)
+            .basic_auth("guest", Some("guest"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let res_json: Value = serde_json::from_str(&res).unwrap();
+        let bindings = res_json.as_array().unwrap();
+        let is_bound = bindings.iter().any(|b| {
+            b["source"].as_str().unwrap() == "test_exchange"
+        });
+        assert!(is_bound);
 
         channel.close().await.unwrap();
         client_channel.close().await.unwrap();
