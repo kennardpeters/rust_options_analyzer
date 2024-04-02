@@ -257,7 +257,7 @@ mod tests {
         let client = Client::new();
         let url = format!("http://localhost:15672/api/queues/{}/bindings", queue_name);
 
-        // Verify that the queue exists
+        // Verify that the queue exists via management API
         let res = client.get(&url)
             .basic_auth("guest", Some("guest"))
             .send()
