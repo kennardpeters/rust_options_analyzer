@@ -13,12 +13,13 @@ use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
 use sqlx::postgres::PgPool;
 
 
-pub mod options_scraper;
-pub mod parsing_queue;
 pub mod scraped_cache;
+pub mod db;
 pub mod mq;
 pub mod types;
+pub mod options_scraper;
 pub mod writing_queue;
+pub mod parsing_queue;
 pub use mq::Queue;
 
 
@@ -57,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let writing_routing_key = "writing_queue";
     let w_exchange_name = "amq.direct";
     let queue_name = "writing_queue";
-    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, atomic_pool.clone() ,tx.clone())));
+    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, atomic_pool.clone(), tx.clone())));
     println!("Writing Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
