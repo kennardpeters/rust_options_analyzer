@@ -13,12 +13,13 @@ use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
 use sqlx::postgres::PgPool;
 
 
-pub mod options_scraper;
-pub mod parsing_queue;
 pub mod scraped_cache;
+pub mod db;
 pub mod mq;
 pub mod types;
+pub mod options_scraper;
 pub mod writing_queue;
+pub mod parsing_queue;
 pub use mq::Queue;
 
 
@@ -28,15 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
     println!("MQ Connection Created");
 
-    //  
-    let mut pool = match PgPool::connect("postgres://postgres:postgres@127.0.0.1:5444/scraped").await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("main: Error while connecting to postgres: {}", e);
-            process::exit(1);
-        }
-    };
-    let mut atomic_pool = Arc::new(tokio::sync::Mutex::new(pool.clone())); 
+    //
+    let mut db_connection = Arc::new(tokio::sync::Mutex::new(db::DBConnection::new("localhost", 5444, "postgres", "postgres", "scraped")));
     println!("DB Pool Created");
 
 
@@ -57,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let writing_routing_key = "writing_queue";
     let w_exchange_name = "amq.direct";
     let queue_name = "writing_queue";
-    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, atomic_pool.clone() ,tx.clone())));
+    let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, db_connection.clone(), tx.clone())));
     println!("Writing Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
