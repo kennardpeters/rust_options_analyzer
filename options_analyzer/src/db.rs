@@ -8,18 +8,6 @@ use std::sync::Arc;
 use std::error::Error;
 use crate::types::{Contract, Responder};
 
-#[derive(Debug)]
-pub enum DbCommand {
-    Get {
-        key: String,
-        resp: Responder<Option<Contract>, ()>,
-    },
-    Post {
-        key: String,
-        value: String,
-        resp: Responder<(), dyn Error>,
-    },
-}
 
 //DBConnection is a struct to handle storing and opening connections to the database 
 pub struct DBConnection<'a> {
@@ -66,11 +54,16 @@ impl<'a> DBConnection<'a> {
         Ok(())
 
     }
-}
-
-//TODO: Utilize channels for this instead
-async fn insert_contract(contract: &Contract, db: DBConnection) -> Result<(), sqlx::Error> {
-        //let pool = self.pool.lock().await.clone();
+    pub async fn insert_contract(&mut self, contract: &Contract) -> Result<(), sqlx::Error> {
+        let pool = match &self.connection_pool {
+            Some(v) => v,
+            None => {
+                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
+                //sqlx::Error::from(j)
+                println!("{}", msg);
+                return Err(sqlx::Error::PoolClosed);
+            },
+        };
         let result = sqlx::query(
             r#"
                 INSERT INTO contracts
@@ -78,8 +71,8 @@ async fn insert_contract(contract: &Contract, db: DBConnection) -> Result<(), sq
                 Returning time
             "#,
         )
-            .bind(contract.contract_name)
-            .bind(contract.last_trade_date)
+            .bind(contract.contract_name.clone())
+            .bind(contract.last_trade_date.clone())
             .bind(contract.strike)
             .bind(contract.last_price)
             .bind(contract.bid)
@@ -88,11 +81,11 @@ async fn insert_contract(contract: &Contract, db: DBConnection) -> Result<(), sq
             .bind(contract.percent_change)
             .bind(contract.volume)
             .bind(contract.open_interest)
-            .fetch_one(&db.connection_pool).await;
+            .fetch_one(pool).await;
         match result {
             Ok(v) => {
                 println!("Successfully inserted into postgres!");
-                return Ok(v);     
+                return Ok(());     
             },
             Err(e) => {
                 let msg = format!("db::insert_contract - Error occurred while inserting into postgres: {}", e);
@@ -100,4 +93,7 @@ async fn insert_contract(contract: &Contract, db: DBConnection) -> Result<(), sq
                 return Err(e);
             },
         };
+        Ok(())
+    }
 }
+
