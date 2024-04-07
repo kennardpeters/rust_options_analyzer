@@ -222,7 +222,7 @@ mod tests {
         
 
         //Main function we are testing
-        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").await {
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "amq.direct").await {
             Ok(v) => v,
             Err(e) => {
                 println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
@@ -269,7 +269,7 @@ mod tests {
         let res_json: Value = serde_json::from_str(&res).unwrap();
         let bindings = res_json.as_array().unwrap();
         let is_bound = bindings.iter().any(|b| {
-            b["source"].as_str().unwrap() == "test_exchange"
+            b["source"].as_str().unwrap() == "amq.direct"
         });
         assert!(is_bound);
 
@@ -304,7 +304,7 @@ mod tests {
         
 
         //Main function we are testing
-        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "test_exchange").await {
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "amq.direct").await {
             Ok(v) => v,
             Err(e) => {
                 println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
@@ -338,7 +338,7 @@ mod tests {
 
 
 
-        let pub_result = publish_to_queue(&mut channel, "test_exchange", "test_routing_key", test_content).await.unwrap();
+        let pub_result = publish_to_queue(&mut channel, "amq.direct", "test_routing_key", test_content).await.unwrap();
         assert_eq!(pub_result, ());
         //check if mq was published using a fake consumer
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
