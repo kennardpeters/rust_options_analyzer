@@ -241,7 +241,6 @@ use curl::easy::Easy;
         // parsing block
         let dom = Html::parse_document(stringed.as_str());
     
-        //let td_selector = Selector::parse(r#"table > tbody > tr > td"#).unwrap();
         let td_selector = match Selector::parse(r#"table > tbody > tr > td"#) {
             Ok(x) => x,
             Err(e) => {
