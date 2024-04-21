@@ -141,7 +141,7 @@ impl<'a> ParsingQueue<'a> {
         } else {
             url = format!(r#"https://finance.yahoo.com/quote/{}/options?p={}"#, symbol, symbol);
         }
-        dbg!("URL: {:?}", url.clone());
+        println!("URL: {:?}", url.clone());
 
         let output_ts = match options_scraper::async_scrape(url.as_str()).await {
             Ok(x) => x,
@@ -156,7 +156,7 @@ impl<'a> ParsingQueue<'a> {
         }; 
 
 
-        println!("Serialized Object LENGTH: {:?}", output_ts.data.len());
+        println!("process_fun: 159 Serialized Object LENGTH: {:?}", output_ts.data.len());
 
         for i in output_ts.data.iter() {
             let (resp_tx, resp_rx) = oneshot::channel();
@@ -246,6 +246,7 @@ mod tests {
     static OPTION_HTML: &str = "./test_data/mock_option.html";
     static NOTFOUND: &[u8] = b"Not Found";
 
+    //Helper functions for spinning up mock http server
     async fn tokio_handle_client(req: Request<hyper::body::Incoming>) -> HyperResult<Response<BoxBody<Bytes, std::io::Error>>> {
         match (req.method(), req.uri().path()) {
             (&Method::GET, "/test_option") => simple_file_send(OPTION_HTML).await,
@@ -313,10 +314,6 @@ mod tests {
         };
         assert!(pub_channel.is_some());
 
-        //Create a cancellation token for the thread
-        let token = CancellationToken::new();
-
-
         // create a cache channel
         let (tx, mut rx) = mpsc::channel::<Command>(32);
         //Instantiate cache
@@ -344,28 +341,27 @@ mod tests {
            } 
         });
 
-        // create a queue item and publish to the queue
-        let cloned_token = token.clone();
-        // Possibly create/find a fake webpage to scrape 
+        
+        // spin up fake http server to scrape with queue
         let mock_server = tokio::spawn(async move {
             let listener = TokioTcpListener::bind("127.0.0.1:7878").await.unwrap();
 
             loop {
-                if let Ok((stream, _)) = listener.accept().await {
+                if let Ok((stream, addr)) = listener.accept().await {
                     let io = TokioIo::new(stream);
+                    println!("Addr: {:?}", addr);
 
                     tokio::task::spawn(async move {
                         if let Err(err) = http1::Builder::new()
                         .serve_connection(io, service_fn(tokio_handle_client))
                         .await
                         {
-                            print!("Failed to serve connection: {:?}", err);
+                            print!("parsing_queue::test_process - Failed to serve connection: {:?}", err);
                         }
                     });
                 } else {
-                    eprint!("Error reading tcp stream!");
+                    eprint!("parsing_queue::test_process - Error reading tcp stream!");
                 }
-                //let (stream, _) = listener.accept().await?;
 
             }
 
@@ -373,13 +369,8 @@ mod tests {
             
             
         });
-        //let response = reqwest::get("http://127.0.0.1:7878/test_option");
-        //println!("Response code: {:?}", response.await.unwrap());
-        token.cancel();
 
-        tokio::time::sleep(Duration::from_secs(1));
-
-
+        // create a queue item and publish to the queue
         let queue_name = "parsing_queue";
         let exchange_name = "amq.direct";
 
@@ -450,7 +441,6 @@ mod tests {
 
         });
 
-
         dbg!(parshing_thread.await.is_ok());
         
         // Verify the cache is updated with the data we expected to be scraped
@@ -463,14 +453,14 @@ mod tests {
         match txc.send(command).await {
             Ok(_) => {},
             Err(e) => {
-                let msg = format!("writing_queue::process_func - Error occurred while requesting contract from cache: {}", e);
+                let msg = format!("parsing_queue::test_process - Error occurred while requesting contract from cache: {}", e);
                 println!("{}", msg);
             },
         };
         let resp = match resp_rx.await {
             Ok(x) => x,
             Err(e) => {
-                let msg = format!("writing_queue::process_func - Error occurred while receiving contract from cache: {}", e);
+                let msg = format!("parsing_queue::test_process - Error occurred while receiving contract from cache: {}", e);
                 println!("{}", msg);
                 Err(()) 
             },
@@ -486,12 +476,14 @@ mod tests {
                 }
             },
             Err(e) => {
-                let msg = format!("parsing_queue::process_func - Error occurred while receiving contract from cache: {:?}", e);
+                let msg = format!("parsing_queue::test_process - Error occurred while receiving contract from cache: {:?}", e);
                 panic!("{}", msg);
                 Contract::new()
             },
         };
-        //mock_server.abort();
+
+        //Shut down mock server running in the background
+        mock_server.abort();
 
         assert_eq!(contract.strike, 440.0);
     }

@@ -252,10 +252,10 @@ mod tests {
         };
         assert_eq!(queue_res, ());
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-
         let client = Client::new();
-        let url = format!("http://localhost:15672/api/queues/{}/bindings", queue_name);
+
+        //Should be formatted like this: http://localhost:15672/api/queues/%2F/test_queue/bindings
+        let url = format!("http://localhost:15672/api/queues/%2F/{}/bindings", queue_name);
 
         // Verify that the queue exists via management API
         let res = client.get(&url)
@@ -266,8 +266,23 @@ mod tests {
             .text()
             .await
             .unwrap();
-        let res_json: Value = serde_json::from_str(&res).unwrap();
-        let bindings = res_json.as_array().unwrap();
+
+        let res_json: Value = match serde_json::from_str(&res) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("Error while unserializing into Value: {:?}", e);
+                eprintln!("{:?}", msg);
+                panic!("{:?}", msg);
+            }
+        };
+        let bindings = match res_json.as_array() {
+            Some(v) => v,
+            None => {
+                let msg = format!("Unwrapped none while converting json to array");
+                eprintln!("{:?}", msg);
+                panic!("{:?}", msg);
+            }
+        };
         let is_bound = bindings.iter().any(|b| {
             b["source"].as_str().unwrap() == "amq.direct"
         });
