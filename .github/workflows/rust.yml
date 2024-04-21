@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_TEST_TIME_UNIT: 60
 
 jobs:
   build:
@@ -25,6 +26,6 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       working-directory: ./options_analyzer
-      run: cargo test --verbose
+      run: cargo test --verbose --ensure-time
     - name: shutdown containers
       run: docker compose down
