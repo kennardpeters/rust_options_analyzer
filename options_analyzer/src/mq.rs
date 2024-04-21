@@ -8,7 +8,12 @@ extern crate std;
 use amqprs::{
     callbacks::{DefaultChannelCallback, DefaultConnectionCallback}, channel::{
         BasicAckArguments, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
-    }, connection::{Connection, OpenConnectionArguments}, consumer::AsyncConsumer, AmqpChannelId, BasicProperties, Deliver
+    }, 
+    connection::{Connection, OpenConnectionArguments}, 
+    consumer::AsyncConsumer, 
+    AmqpChannelId, 
+    BasicProperties, 
+    Deliver
 };
 use tokio::time;
 use std::{borrow::BorrowMut, str, sync::Arc};
@@ -34,6 +39,7 @@ pub struct MQConnection<'a> {
 }
 
 impl<'a> MQConnection<'a> {
+    //new method is a constructor for creating a new mq connection
     pub fn new(
         host: &'a str,
         port: u16,
@@ -184,12 +190,217 @@ pub trait Queue {
     //Insert into next queue
 }
 
+//Requires RabbitMQ to be running
+#[cfg(test)]
+mod tests {
+    use amqprs::consumer::DefaultConsumer;
+
+    use super::*;
+
+    use reqwest::Client;
+    use serde_json::Value;
+    #[tokio::test]
+    async fn test_add_queue() {
+        //Setup using the MQConnection struct
+        let mut mq = MQConnection::new("localhost", 5672, "guest", "guest");
+        let conn_result = match mq.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while opening connection: {}", e);
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        let mut channel = match mq.add_channel(Some(2)).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        
+
+        //Main function we are testing
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "amq.direct").await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
+                return;
+            }
+        };
+        assert_eq!(res, ());
 
 
+        //verify that queue exists on channel/exchange
+        let mut client_channel = match mq.add_channel(None).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        // Attempt to declare the queue with passive option
+        let queue_name = "test_queue";
+        let client_args = QueueDeclareArguments::durable_client_named(queue_name).passive(true).finish();
+        let queue_res = match client_channel.queue_declare(client_args).await {
+            Ok(_) => println!("Queue {} exists", queue_name),
+            Err(e) => {
+                println!("Queue {} does not exist: {}", queue_name, e);
+            }
+        };
+        assert_eq!(queue_res, ());
+
+        let client = Client::new();
+
+        //Should be formatted like this: http://localhost:15672/api/queues/%2F/test_queue/bindings
+        let url = format!("http://localhost:15672/api/queues/%2F/{}/bindings", queue_name);
+
+        // Verify that the queue exists via management API
+        let res = client.get(&url)
+            .basic_auth("guest", Some("guest"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        let res_json: Value = match serde_json::from_str(&res) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("Error while unserializing into Value: {:?}", e);
+                eprintln!("{:?}", msg);
+                panic!("{:?}", msg);
+            }
+        };
+        let bindings = match res_json.as_array() {
+            Some(v) => v,
+            None => {
+                let msg = format!("Unwrapped none while converting json to array");
+                eprintln!("{:?}", msg);
+                panic!("{:?}", msg);
+            }
+        };
+        let is_bound = bindings.iter().any(|b| {
+            b["source"].as_str().unwrap() == "amq.direct"
+        });
+        assert!(is_bound);
+
+        channel.close().await.unwrap();
+        client_channel.close().await.unwrap();
+        mq.close_connections().await.unwrap();
+
+        
+    }
+    
+    #[tokio::test]
+    async fn test_publish_to_queue() {
+        //TODO:
+        let mut mq = MQConnection::new("localhost", 5672, "guest", "guest");
+
+        let conn_result = match mq.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while opening connection: {}", e);
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        let mut channel = match mq.add_channel(Some(2)).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding channel: {}", e);
+                return;
+            }
+        };
+
+        
+
+        //Main function we are testing
+        let res = match mq.add_queue(&mut channel, "test_queue", "test_routing_key", "amq.direct").await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding queue: {}", e);
+                return;
+            }
+        };
+
+        let args = BasicConsumeArguments::new(
+            "test_queue",
+            "test_consumer_tag",
+        );
+
+        let test_content = String::from(
+            r#"
+                {
+                    "publisher": "cargo test",
+                    "data": "test_junk"
+                }
+            "#,
+        ).into_bytes();
+
+        let _consumer = match channel.basic_consume(TestConsumer::new(args.no_ack, test_content.clone()), args).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("mq::test_add_queue - Error occurred while adding consumer: {}", e);
+                return;
+            }
+        };
+
+        // publish message
+
+
+
+        let pub_result = publish_to_queue(&mut channel, "amq.direct", "test_routing_key", test_content).await.unwrap();
+        assert_eq!(pub_result, ());
+        //check if mq was published using a fake consumer
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        channel.close().await.unwrap();
+        mq.close_connections().await.unwrap();
+    }
+
+}
+
+//Test Consumer used for mq testing
+pub struct TestConsumer {
+    no_ack: bool,
+    expected_content: Vec<u8>, 
+}
+
+impl TestConsumer {
+    pub fn new(no_ack: bool, expected_content: Vec<u8>) -> Self {
+        Self { 
+            no_ack, 
+            expected_content
+        }
+
+    }
+}
+
+#[async_trait]
+impl AsyncConsumer for TestConsumer {
+    async fn consume(
+        &mut self,
+        channel: &Channel,
+        deliver: Deliver,
+        _basic_properities: BasicProperties,
+        content: Vec<u8>,
+    ) {
+        assert_eq!(self.expected_content, content);
+
+        let args = BasicAckArguments::new(deliver.delivery_tag(), false);
+
+        channel.basic_ack(args).await.unwrap();
+
+    }
+}
 
 //Deprecated Struct to implement previous consumer pattern
 pub struct ExampleConsumer {
-   no_ack: bool, 
+   no_ack: bool,
 }
 
 impl ExampleConsumer {

@@ -1,6 +1,7 @@
 extern crate serde;
 extern crate chrono;
 extern crate tokio;
+extern crate sqlx;
 
 use std::ops::Deref;
 
@@ -8,7 +9,9 @@ pub use crate::options_scraper::UnparsedContract;
 use serde::{Serialize, Deserialize};
 use chrono::{NaiveDateTime, DateTime, Utc};
 use chrono::format::ParseError;
+use sqlx::Row;
 use tokio::sync::{mpsc::Sender, oneshot};
+use sqlx::postgres::PgRow;
 
  #[derive(Debug, Serialize, Deserialize, Clone)]
  pub struct Contract {
@@ -119,6 +122,25 @@ impl Contract {
                 0.0
             }
         };
+    }
+}
+
+impl From<PgRow> for Contract {
+    fn from(row: PgRow) -> Self {
+        Contract {
+            timestamp: row.get(0),
+            contract_name: row.get(1),
+            last_trade_date: row.get(2),
+            strike: row.get(3),
+            last_price: row.get(4),
+            bid: row.get(5),
+            ask: row.get(6),
+            change: row.get(7),
+            percent_change: row.get(8),
+            volume: row.get(9),
+            open_interest: row.get(10),
+            implied_volatility: row.get(11),
+        }
     }
 }
 

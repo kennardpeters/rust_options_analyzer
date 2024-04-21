@@ -4,7 +4,7 @@ extern crate serde_json;
 extern crate std;
 extern crate sqlx;
 
-use crate::mq::Queue;
+use crate::mq::{Queue, MQConnection};
 use crate::types::Contract;
 use crate::scraped_cache::{ScrapedCache, Command};
 use crate::db::DBConnection;
@@ -185,5 +185,139 @@ impl<'a> WritingQueue<'a> {
         //TODO: Insert into next queue once created
         
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future;
+
+    use super::*;
+    use tokio::sync::mpsc;
+    use crate::mq::publish_to_queue;
+
+    #[tokio::test]
+    async fn test_process() {
+        //Create an mq instance
+        //Setup using the MQConnection struct
+        let mut mq_connection = Arc::new(Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
+        let mut mq_connection_p = mq_connection.clone();
+        //publishing logic
+        let conn_result = match mq_connection_p.lock().await.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("writing_queue::test_process - Error occurred while opening connection: {}", e);
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        let mut pub_channel = match mq_connection_p.lock().await.add_channel(Some(2)).await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                println!("writing_queue::test_process - Error occurred while adding channel: {}", e);
+                None
+            }
+        };
+        assert!(pub_channel.is_some());
+        //Create fake contract
+        let mut contract = Contract::new();
+        contract.contract_name = "TEST_CONTRACT".to_string();
+        contract.last_price = 100.0;
+
+        
+        //caching channel
+        let (tx, mut rx) = mpsc::channel::<Command>(32);
+        //Instantiate cache
+        let mut scraped_cache = ScrapedCache::new(100);
+
+        //Insert fake contract into cache
+        scraped_cache.set("TEST_CONTRACT".to_string(), contract.clone());
+        //Instantiate db_connection
+        let db_connection = Arc::new(Mutex::new(DBConnection::new("localhost", 5432, "postgres", "postgres", "postgres")));
+
+
+        //Create a writing queue
+        let mut writing_queue = Arc::new(Mutex::new(WritingQueue::new("writing_queue", "writing_queue", "amq.direct", db_connection.clone(), tx.clone())));
+        //Process the queue
+        
+        let mut mq_connection_w = mq_connection.clone();
+        tokio::spawn(async move {
+            let w_exchange_name = "amq.direct";
+            let writing_routing_key = "writing_queue"; 
+            let queue_name = "writing_queue";
+
+            let mut mq_connection_w = mq_connection_w.lock().await;
+
+            //declare new channel for background thread
+            let w_channel_id = Some(6);
+            let mut sub_channel = match mq_connection_w.add_channel(w_channel_id).await {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("main: Error occurred while adding sub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
+                    None
+                }
+            };
+            println!("sub Channel Created on Writing Thread");
+
+            //declare a new channel for publishing from background thread
+            let pfw_channel_id = Some(7);
+            let mut pub_channel = match mq_connection_w.add_channel(pfw_channel_id).await {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("main: Error occurred while adding pub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
+                    None
+                }
+            };
+            assert!(sub_channel.is_some() == true);
+
+            let queue_added = match mq_connection_w.add_queue(sub_channel.as_mut().unwrap(), queue_name, writing_routing_key, w_exchange_name).await {
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
+                }
+            };
+            assert_eq!(queue_added, ());
+            println!("Queue Created on Writing Thread");
+
+            let writing_queue = writing_queue.clone();
+            match writing_queue.lock().await.process_queue(sub_channel.as_mut().unwrap(), pub_channel.as_mut().unwrap()).await {
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("writing_queue::test_process - Error occurred while WritingQueue::processing queue: {}", e);
+                    assert!(false);
+                    
+                }
+            };
+        });
+        //Create fake queue item
+        let e_content = String::from(
+            format!(
+                r#"
+                    {{
+                        "publisher": "writing unit test",
+                        "key": {:?}
+                    }}
+                "#,
+                contract.contract_name 
+            )
+        ).into_bytes();
+        publish_to_queue(pub_channel.as_mut().unwrap(), "amq.direct", "writing_queue", e_content).await;
+
+        //await processing of queue item
+        
+        //Verify the contract has been inserted into the db
+        let observed_contract = match db_connection.lock().await.select_contract("TEST_CONTRACT").await {
+            Ok(x) => {
+                x
+            },
+            Err(e) => {
+                println!("writing_queue::process_func - Error occurred while receiving contract from cache: {:?}", e);
+                return;
+            },
+        };
+        assert_eq!(observed_contract.last_price, contract.last_price);
+        //delete the fake contract from the db
+        let deleted_contract = db_connection.lock().await.delete_contract("TEST_CONTRACT").await;
+        assert!(deleted_contract.is_ok());
     }
 }

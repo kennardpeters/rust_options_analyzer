@@ -7,13 +7,14 @@ extern crate serde;
 extern crate reqwest;
 use scraper::{Html, Selector};
 use tokio::sync::watch::error;
-use std::{env::args, fmt::Error, str};
+use std::{env::args, fmt::Error,str};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
 use serde_json;
 
 use curl::easy::Easy;
 
+static DEBUG: bool = false;
 //Purpose of this module is to pull a table observations
 // and parse the html into json (later protobufs)
 
@@ -133,7 +134,6 @@ use curl::easy::Easy;
     
         //Need to make this more reproducible (also input symbol)
         //TODO: build request url dynamically using format!
-        //easy.url(url).unwrap();
         match easy.url(url) {
             Ok(_) => (),
             Err(e) => {
@@ -222,6 +222,8 @@ use curl::easy::Easy;
     
     
         let text = resp.text().await?;
+
+        println!("Length of resp: {:?}", text.clone().len());
    
         let ts = match process_bytes(text) {
             Ok(x) => x,
@@ -237,11 +239,14 @@ use curl::easy::Easy;
         //Instantiate list for storing parsed data
         let mut scraped_elements = Vec::new();
         let mut contracts:Vec<UnparsedContract> = Vec::new();
+
+        if DEBUG {
+            println!("Stringed Document {:?}", stringed.clone());
+        }
     
         // parsing block
         let dom = Html::parse_document(stringed.as_str());
     
-        //let td_selector = Selector::parse(r#"table > tbody > tr > td"#).unwrap();
         let td_selector = match Selector::parse(r#"table > tbody > tr > td"#) {
             Ok(x) => x,
             Err(e) => {
@@ -263,7 +268,8 @@ use curl::easy::Easy;
         contract[0] = "".to_string();
         for element in scraped_elements {
 
-            if count >= 12 {
+            ///TODO: Remove this hard-coded value: LOL
+            if count >= 11 {
                 let mut i = 1;
                 let mut new_contract = UnparsedContract::new();
                 while i < 12 {
@@ -311,6 +317,10 @@ use curl::easy::Easy;
                 contract[count] = span_element;
                 count += 1;
                 continue;
+            }
+
+            if DEBUG {
+                println!("element: {:?}\n", element);
             }
 
             contract[count] = element;

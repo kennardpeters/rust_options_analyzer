@@ -95,5 +95,50 @@ impl<'a> DBConnection<'a> {
         };
         Ok(())
     }
+    pub async fn select_contract(&mut self, contract_name: &str) -> Result<Contract, sqlx::Error> {
+        let pool = match &self.connection_pool {
+            Some(v) => v,
+            None => {
+                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
+                //sqlx::Error::from(j)
+                println!("{}", msg);
+                return Err(sqlx::Error::PoolClosed);
+            },
+        };
+        let result = match sqlx::query(
+            r#"
+                SELECT * FROM contracts WHERE contract_name = $1;
+            "#,
+        ).bind(contract_name)
+        .fetch_one(pool).await {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        };
+        //have to implement trait to do this in a straightforward manner
+
+        //match result
+        return Ok(Contract::from(result));
+    }
+    pub async fn delete_contract(&mut self, contract_name: &str) -> Result<(), sqlx::Error> {
+        let pool = match &self.connection_pool {
+            Some(v) => v,
+            None => {
+                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
+                //sqlx::Error::from(j)
+                println!("{}", msg);
+                return Err(sqlx::Error::PoolClosed);
+            },
+        };
+        let result = match sqlx::query(
+            r#"
+                DELETE FROM contracts WHERE contract_name = $1;
+            "#,
+        ).bind(contract_name)
+        .execute(pool).await {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        };
+        Ok(())
+    }
 }
 
