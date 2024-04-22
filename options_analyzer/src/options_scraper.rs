@@ -5,6 +5,7 @@ extern crate scraper;
 extern crate curl;
 extern crate serde;
 extern crate reqwest;
+use reqwest::header::HeaderMap;
 use scraper::{Html, Selector};
 use tokio::sync::watch::error;
 use std::{env::args, fmt::Error,str};
@@ -14,7 +15,7 @@ use serde_json;
 
 use curl::easy::Easy;
 
-static DEBUG: bool = false;
+static DEBUG: bool = true;
 //Purpose of this module is to pull a table observations
 // and parse the html into json (later protobufs)
 
@@ -210,7 +211,21 @@ static DEBUG: bool = false;
 
     pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::Error>> {
         //TODO: Build url dynamically here:
-        let resp = match reqwest::get(url).await {
+        //let mut headers = HeaderMap::new();
+        //Cookie?
+        //Sec-Ch-Ua
+        //Sec-Ch-Ua-Platform
+        //Sec-Fetch-Dest
+        //User-Agent
+        //headers.insert(key, value.parse().unwrap());
+        let client = reqwest::Client::new();
+        let resp = match client.get(url)
+        .header("Sec-Ch-Ua", r#""Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123""#)
+        .header("Sec-Ch-Ua-Platform", r#""macOS""#)
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+        .send().await {
             Ok(x) => x,
             Err(e) => {
                 let msg = format!("options_scraper::async_scrape: error on reqwest to url: {} - {}", url, e); 
