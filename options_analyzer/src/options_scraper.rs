@@ -15,7 +15,7 @@ use serde_json;
 
 use curl::easy::Easy;
 
-static DEBUG: bool = true;
+static DEBUG: bool = false;
 //Purpose of this module is to pull a table observations
 // and parse the html into json (later protobufs)
 
@@ -278,7 +278,6 @@ static DEBUG: bool = true;
         
         //May need a better way here to detect if html is still present in the string
         let mut count = 1;
-        //let contract = Contract::new().borrow_mut();
         let mut contract: Vec<String> = vec!["".to_string(); 12];
         contract[0] = "".to_string();
         for element in scraped_elements {
@@ -287,7 +286,7 @@ static DEBUG: bool = true;
             if count >= 11 {
                 let mut i = 1;
                 let mut new_contract = UnparsedContract::new();
-                while i < 12 {
+                while i < 11 {
                     new_contract.idx_to_key(i, contract[i].to_string());
                     i += 1;
                 }

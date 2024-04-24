@@ -1,6 +1,10 @@
 FROM rust
 
-COPY . . 
+# Set destination for COPY
+#WORKDIR /app
+
+COPY . .
+#COPY .env /app/
 
 RUN cargo build --release
 

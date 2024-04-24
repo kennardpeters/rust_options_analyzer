@@ -1,6 +1,6 @@
 #![allow(unused)]
 use core::time;
-use std::{borrow::{Borrow, BorrowMut}, process, sync::{Arc, Mutex}};
+use std::{borrow::{Borrow, BorrowMut}, process, sync::{Arc, Mutex}, env};
 
 use tokio::{sync::oneshot, time::{interval, Duration}};
 use mq::MQConnection;
@@ -11,6 +11,7 @@ use crate::scraped_cache::ScrapedCache;
 use serde_json::Value;
 use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
 use sqlx::postgres::PgPool;
+use dotenv::dotenv;
 
 
 pub mod scraped_cache;
@@ -25,6 +26,19 @@ pub use mq::Queue;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
+
+    let symbol = match env::var("SYMBOL") {
+        Ok(v) => {
+            if v != "" {
+                v
+            } else {
+                panic!("SYMBOL was empty in environment")
+            }
+        },
+        Err(e) => panic!("SYMBOL not found in environment"),
+    };
+
     //"host.docker.internal" 
     let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
     println!("MQ Connection Created");
@@ -75,13 +89,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     //TODO: Convert this to another form of input (Cmd line arg, csv, or initiated by front-end?) 
     let content = String::from(
-        r#"
-            {
+        format!(r#"
+            {{
                 "publisher": "main",
-                "data": "Hello, amqprs!",
-                "symbol": "SPY"
-            }
+                "symbol": {:?} 
+            }}
         "#,
+        symbol)
     ).into_bytes();
     println!("content created");
 
@@ -162,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mq_connection_w = mq_connection.clone();
     tokio::spawn(async move {
         let w_exchange_name = "amq.direct";
-        let writing_routing_key = writing_routing_key.clone(); 
+        let writing_routing_key = writing_routing_key; 
         let queue_name = "writing_queue";
 
         let mut mq_connection_w = mq_connection_w.lock().await;
