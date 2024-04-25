@@ -328,14 +328,22 @@ static DEBUG: bool = false;
             //If a exists in inner html add the inner_html of a instead 
             if a.is_ok() {
                 let a_element = a.unwrap().inner_html();
-                contract[count] = a_element;
+                if a_element.contains(" ") {
+                    contract[count] = a_element.replace(" ", "");
+                } else {
+                    contract[count] = a_element;
+                }
                 count += 1;
                 continue;
             }
             //If span exists in inner html add the inner_html of span instead 
             if span.is_ok() {
                 let span_element = span.unwrap().inner_html();
-                contract[count] = span_element;
+                if span_element.contains(" ") {
+                    contract[count] = span_element.replace(" ", "");
+                } else {
+                    contract[count] = span_element;
+                }
                 count += 1;
                 continue;
             }
@@ -344,8 +352,11 @@ static DEBUG: bool = false;
                 dbg!("element: {:?}\n", element.clone());
             }
             
-
-            contract[count] = element.to_string();
+            if element.contains(" ") {
+                contract[count] = element.replace(" ", "");
+            } else {
+                contract[count] = element.to_string();
+            }
     
     
             //contract.idx_to_key(count, element);
