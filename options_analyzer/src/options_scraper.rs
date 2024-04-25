@@ -272,21 +272,28 @@ static DEBUG: bool = false;
         };
     
         for element in dom.select(&td_selector) {
-                scraped_elements.push(element.inner_html());
+                let mut scraped_element = element.inner_html();
+                //TODO: Fix this hard coded value to something either inputted or part of a removeList 
+                if scraped_element.contains("<span class=\"svelte-12t6atp\"></span>") {
+                    scraped_element = scraped_element.replace("<span class=\"svelte-12t6atp\"></span>", "");
+                }
+                scraped_elements.push(scraped_element.clone());
         }
+
     
         
         //May need a better way here to detect if html is still present in the string
         let mut count = 1;
         let mut contract: Vec<String> = vec!["".to_string(); 12];
         contract[0] = "".to_string();
-        for element in scraped_elements {
+        let scraped_length = scraped_elements.len();
+        for (idx, element) in scraped_elements.iter_mut().enumerate() {
 
             ///TODO: Remove this hard-coded value: LOL
-            if count >= 11 {
+            if count >= 12 || idx == scraped_length - 1  {
                 let mut i = 1;
                 let mut new_contract = UnparsedContract::new();
-                while i < 11 {
+                while i < 12 {
                     new_contract.idx_to_key(i, contract[i].to_string());
                     i += 1;
                 }
@@ -334,10 +341,11 @@ static DEBUG: bool = false;
             }
 
             if DEBUG {
-                println!("element: {:?}\n", element);
+                dbg!("element: {:?}\n", element.clone());
             }
+            
 
-            contract[count] = element;
+            contract[count] = element.to_string();
     
     
             //contract.idx_to_key(count, element);
@@ -348,3 +356,48 @@ static DEBUG: bool = false;
             data: contracts,
         })
     }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use dotenv::dotenv;
+
+
+    #[ignore = "Used for testing external endpoint"]
+    #[tokio::test]
+    async fn test_async_scrape() {
+        dotenv().ok();
+    
+        let symbol = match env::var("SYMBOL") {
+            Ok(v) => {
+                if v != "" {
+                    v
+                } else {
+                    panic!("SYMBOL was empty in environment")
+                }
+            },
+            Err(e) => panic!("SYMBOL not found in environment"),
+        };
+    
+        let url = format!(r#"https://{}"#, symbol);
+
+        let output_ts = match async_scrape(url.as_str()).await {
+            Ok(x) => x,
+            Err(e) => {
+                let msg = format!("parsing_queue.AsyncConsumer.consume - Error occurred while scraping: {}", e);
+                println!("{}", msg);
+                //Panic! here?
+                TimeSeries {
+                    data: Vec::new(),
+                }
+            },
+        }; 
+        for i in output_ts.data.iter() {
+            dbg!("Contract: {:?}\n", i);
+        }
+
+
+    }
+}
+
