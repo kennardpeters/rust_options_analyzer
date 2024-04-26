@@ -267,11 +267,11 @@ mod tests {
             let (resp_tx, resp_rx) = oneshot::channel();
             //Set mock contract in cache 
             let mut contract = Contract::new();
-            contract.contract_name = contract_name1.clone().to_string();
+            contract.contract_name = contract_name1.to_string();
             contract.last_price = last_price1.clone();
 
             let command = Command::Set{
-                key: contract_name1.clone().to_string(),
+                key: contract_name1.to_string(),
                 value: contract.clone(),
                 resp: resp_tx,
             };
@@ -300,11 +300,11 @@ mod tests {
             let (resp_tx, resp_rx) = oneshot::channel();
             //Set mock contract in cache 
             let mut contract = Contract::new();
-            contract.contract_name = contract_name2.clone().to_string();
+            contract.contract_name = contract_name2.to_string();
             contract.last_price = last_price2.clone();
 
             let command = Command::Set{
-                key: contract_name2.clone().to_string(),
+                key: contract_name2.to_string(),
                 value: contract.clone(),
                 resp: resp_tx,
             };
@@ -334,11 +334,11 @@ mod tests {
             let (resp_tx, resp_rx) = oneshot::channel();
             //Set mock contract in cache 
             let mut contract = Contract::new();
-            contract.contract_name = contract_name3.clone().to_string();
+            contract.contract_name = contract_name3.to_string();
             contract.last_price = last_price3.clone();
 
             let command = Command::Set{
-                key: contract_name3.clone().to_string(),
+                key: contract_name3.to_string(),
                 value: contract.clone(),
                 resp: resp_tx,
             };
@@ -364,12 +364,12 @@ mod tests {
         thread2.await;
         thread3.await;
 
-        let contracts = vec![contract_name1.clone(), contract_name2.clone(), contract_name3.clone()];
+        let contracts = vec![contract_name1, contract_name2, contract_name3];
         let mut expected = HashMap::new();
         for i in contracts.iter() {
             let (resp_tx, resp_rx) = oneshot::channel();
             let command = Command::Get{
-                key: i.clone().to_string(),
+                key: i.to_string(),
                 resp: resp_tx,
             };
             match tx.send(command).await {
@@ -387,15 +387,15 @@ mod tests {
                     Err(()) 
                 },
             };
-            expected.insert(i.clone().to_string(), resp.unwrap().unwrap());
+            expected.insert(i.to_string(), resp.unwrap().unwrap());
         }
 
 
 
         //Check the result of setting from multiple threads 
-        assert_eq!(last_price1, expected.get(contract_name1.clone()).unwrap().last_price);
-        assert_eq!(last_price2, expected.get(contract_name2.clone()).unwrap().last_price);
-        assert_eq!(last_price3, expected.get(contract_name3.clone()).unwrap().last_price);
+        assert_eq!(last_price1, expected.get(contract_name1).unwrap().last_price);
+        assert_eq!(last_price2, expected.get(contract_name2).unwrap().last_price);
+        assert_eq!(last_price3, expected.get(contract_name3).unwrap().last_price);
         Ok(())
     }
 

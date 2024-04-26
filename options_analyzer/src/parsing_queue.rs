@@ -139,7 +139,10 @@ impl<'a> ParsingQueue<'a> {
         if symbol.contains("test") {
             url = format!(r#"http://localhost:7878/{}"#, symbol); 
         } else {
-            url = format!(r#"https://finance.yahoo.com/quote/{}/options?p={}"#, symbol, symbol);
+            //Old style url: .neo_opt=0
+            url = format!(r#"https://finance.yahoo.com/quote/{}/options?.neo_opt=0"#, symbol);
+            //NOTE: This url needs to be updated for new options
+            //url = format!(r#"https://finance.yahoo.com/quote/{}/options?p={}"#, symbol, symbol);
         }
         println!("URL: {:?}", url.clone());
 
@@ -156,7 +159,11 @@ impl<'a> ParsingQueue<'a> {
         }; 
 
 
-        println!("process_fun: 159 Serialized Object LENGTH: {:?}", output_ts.data.len());
+        println!("process_fun: 160 Serialized Object LENGTH: {:?}", output_ts.data.len());
+        if output_ts.data.len() == 0 {
+            let msg = "parsing_queue::process_func - 0 objects scraped successfully";
+            return Err(msg.into());
+        }
 
         for i in output_ts.data.iter() {
             let (resp_tx, resp_rx) = oneshot::channel();
