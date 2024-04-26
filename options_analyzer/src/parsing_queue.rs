@@ -159,7 +159,11 @@ impl<'a> ParsingQueue<'a> {
         }; 
 
 
-        println!("process_fun: 159 Serialized Object LENGTH: {:?}", output_ts.data.len());
+        println!("process_fun: 160 Serialized Object LENGTH: {:?}", output_ts.data.len());
+        if output_ts.data.len() == 0 {
+            let msg = "parsing_queue::process_func - 0 objects scraped successfully";
+            return Err(msg.into());
+        }
 
         for i in output_ts.data.iter() {
             let (resp_tx, resp_rx) = oneshot::channel();

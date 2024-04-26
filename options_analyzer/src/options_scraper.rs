@@ -222,13 +222,12 @@ pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::E
         let header_name = match reqwest::header::HeaderName::from_lowercase(&header.clone().into_bytes()) {
             Ok(v) => v,
             Err(e) => {
-                let msg = format!("{} {}", e, &header.clone());
+                let msg = format!("{}: {}", e, &header.clone());
                 return Err(msg.into());
             }
         };
         //TODO: fix header value here
         headers.append(header_name, (*header_value).parse().unwrap());
-        dbg!(header);
     }
     let client = reqwest::Client::new();
     let resp = match client.get(url)

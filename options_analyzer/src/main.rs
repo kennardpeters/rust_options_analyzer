@@ -26,6 +26,7 @@ pub use mq::Queue;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    //Grab symbol from environment variables
     dotenv().ok();
 
     let symbol = match env::var("SYMBOL") {
@@ -40,10 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     //"host.docker.internal" 
+    //Declare threadsafe mq connection struct to handle connecting and publishing to rabbitmq
     let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
     println!("MQ Connection Created");
 
-    //
+    //Declare thread-safe db connection struct to handle database calls
     let mut db_connection = Arc::new(tokio::sync::Mutex::new(db::DBConnection::new("localhost", 5444, "postgres", "postgres", "scraped")));
     println!("DB Pool Created");
 

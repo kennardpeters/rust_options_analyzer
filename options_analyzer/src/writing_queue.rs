@@ -147,7 +147,7 @@ impl<'a> WritingQueue<'a> {
                     x.unwrap()
                 } else {
                     println!("Unwrapped None! from Cache");
-                    return Err("Unwrapped None! from Cache".into());
+                    return Err("writing_queue::process_func - Unwrapped None! from Cache".into());
                 }
             },
             Err(e) => {
@@ -156,6 +156,10 @@ impl<'a> WritingQueue<'a> {
                 Contract::new()
             },
         };
+        if contract.strike == 0.0 {
+            return Err("writing_queue::process_func - invalid strike (0.0) => skipping commit to database".into());
+        }
+
 
         //Write to the postgres database
         //insert sqlx code here
