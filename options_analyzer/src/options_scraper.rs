@@ -451,9 +451,10 @@ mod tests {
             },
         };
 
-        println!("Value fo key1: {}", headers.get("User-Agent").unwrap());
-        println!("Value fo key2: {}", headers.get("Sec-Ch-Ua").unwrap());
+        println!("Value fo key1: {}", headers.get("user-agent").unwrap());
+        println!("Value fo key2: {}", headers.get("sec-ch-ua").unwrap());
         println!("Keys found: {:?}", headers.keys());
+        ()
     }
 }
 
