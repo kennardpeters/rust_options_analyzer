@@ -1,0 +1,8 @@
+[reqwest_headers]
+sec-ch-ua='"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"'
+sec-ch-ua-platform='"macOS"'
+sec-fetch-dest="document"
+sec-fetch-mode="navigate"
+user-agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+#Cookie?
+
