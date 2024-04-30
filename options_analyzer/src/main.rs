@@ -223,6 +223,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     });
 
+    //Add Calculation step
+
+
+   //Add Streaming step 
+
 
     mq::publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, parsing_routing_key, content).await?;
     println!("Item Published! from main");
