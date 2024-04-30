@@ -26,7 +26,7 @@ pub struct ParsingQueue<'a> {
     routing_key: &'a str, // queue name for publishing to the next queue
     exchange_name: &'a str, //Exchange name used for publishing to the next queue
     parsing_consumer: Option<ParsingConsumer>,
-    tx: tokio::sync::mpsc::Sender<Command>,
+    tx: tokio::sync::mpsc::Sender<Command>, //tx used for sending /receiving contracts from cache
 }
 
 impl<'a> ParsingQueue<'a> {
