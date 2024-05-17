@@ -4,7 +4,7 @@ extern crate serde_json;
 extern crate std;
 extern crate sqlx;
 
-use crate::mq::{Queue, MQConnection};
+use crate::mq::{Queue, MQConnection, publish_to_queue};
 use crate::types::Contract;
 use crate::scraped_cache::{ScrapedCache, Command};
 use crate::db::DBConnection;
@@ -180,13 +180,22 @@ impl<'a> WritingQueue<'a> {
                 println!("{}", msg);
             },
         };
-
-
-
-
-
-        
         //TODO: Insert into next queue once created
+        let next_key = contract.contract_name;
+        let e_content = String::from(
+            format!(
+                r#"
+                    {{
+                        "publisher": "writing",
+                        "key": {:?}
+                    }}
+                "#,
+                next_key 
+            )
+        ).into_bytes();
+        publish_to_queue(pub_channel, "amq.direct", "writing_queue", e_content).await;
+        
+        
         
         Ok(())
     }

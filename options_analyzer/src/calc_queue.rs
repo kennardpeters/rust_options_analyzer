@@ -1,23 +1,32 @@
 extern crate amqprs;
+extern crate tokio;
+extern crate serde_json;
+extern crate std;
 
-use amqprs::channel::{BasicConsumeArguments, Channel};
+use amqprs::channel::{BasicConsumeArguments, Channel, BasicAckArguments};
+use tokio::sync::{mpsc::Sender, oneshot, Mutex};
+use serde_json::Value;
+use std::{str, sync::Arc};
 
 pub use crate::scraped_cache::{ScrapedCache, Command};
+use crate::db::DBConnection;
 
 
 pub struct CalcQueue<'a> {
     pub name: &'a str,  //Current name of the queue
     next_routing_key: &'a str, //queue name for publishing to the next queue
     next_exchange_name: &'a str, //Exchange name used for publishing to the next queue
+    db_connection: Arc<Mutex<DBConnection<'a>>>,
     tx: tokio::sync::mpsc::Sender<Command> //tx used for sending /receiving contracts from cache
 }
 
-impl<'a> ParsingQueue<'a> {
-    pub fn new(queue_name: &'a str, next_routing_key: &'a str, next_exchange_name: &'a str, tx: Sender<Command>) -> Self {
+impl<'a> CalcQueue<'a> {
+    pub fn new(queue_name: &'a str, next_routing_key: &'a str, next_exchange_name: &'a str, db_connection: Arc<Mutex<DBConnection<'a>>>, tx: Sender<Command>) -> Self {
         Self {
             name: queue_name,
             next_routing_key,
             next_exchange_name,
+            db_connection,
             tx,
         }
     }
@@ -32,7 +41,7 @@ impl<'a> ParsingQueue<'a> {
 
     pub async fn process_queue(&mut self, channel: &mut Channel, pub_channel: &mut Channel) -> Result<(), Box<dyn std::error::Error>> {
         let args = BasicConsumeArguments::new(
-            name,
+            self.name,
             "calc",
         ).manual_ack(false)
         .finish();
@@ -67,23 +76,24 @@ impl<'a> ParsingQueue<'a> {
             println!("calc_queue::process_queue - Unserialized Content: {:?}", unserialized_content);
 
             if unserialized_content.is_null() || unserialized_content["key"].is_null() {
-                println!("calc_queue::process_queue - key is null! for the following delivery: {}" unserialized_content);
+                println!("calc_queue::process_queue - key is null! for the following delivery: {}", unserialized_content);
                 let args = BasicAckArguments::new(delivery.deliver.unwrap().delivery_tag(), false);
 
                 match channel.basic_ack(args).await {
                     Ok(_) => {},
                     Err(e) => {
-                        let msg = format!("calc_queue::process_queue - Error occurred while acking message after null content: {}" e);
+                        let msg = format!("calc_queue::process_queue - Error occurred while acking message after null content: {}", e);
                         println!("{}", msg);
                     }
                 };
+
             } else {
                 //Add main consumer logic here
                 
                 //process_func()
                 
 
-                let args = BasicAckArguments::new(deliver.deliver.unwrap().delivery_tag(), false);
+                let args = BasicAckArguments::new(delivery.deliver.unwrap().delivery_tag(), false);
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
                     Err(e) => {
@@ -94,8 +104,9 @@ impl<'a> ParsingQueue<'a> {
             }
 
 
-
         }
+
+        Ok(())
         
     }
 }

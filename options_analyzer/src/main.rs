@@ -21,6 +21,7 @@ pub mod types;
 pub mod options_scraper;
 pub mod writing_queue;
 pub mod parsing_queue;
+pub mod calc_queue;
 pub use mq::Queue;
 
 
@@ -69,6 +70,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let queue_name = "writing_queue";
     let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, db_connection.clone(), tx.clone())));
     println!("Writing Queue Created");
+
+    //Calculation Queue Declaration
+    let calc_routing_key = "calc_queue";
+    let calc_exchange_name = "amq.direct";
+    let queue_name = "calc_queue";
+    let mut calc_queue = Arc::new(tokio::sync::Mutex::new(calc_queue::CalcQueue::new(queue_name, calc_routing_key, calc_exchange_name, db_connection.clone(), tx.clone())));
+    println!("Calc Queue Created");
 
     let mut mq_connection_p = mq_connection.clone();
     match mq_connection_p.lock().await.open().await {
@@ -224,7 +232,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     //Add Calculation step
+    let mut mq_connection_ca = mq_connection.clone();
+    tokio::spawn(async move {
+        let exchange_name = "amq.direct";
+        let queue_name = "calc_queue";
+        let calc_routing_key = queue_name; 
 
+        let mut mq_connection_ca = mq_connection_ca.lock().await;
+
+        //declare new channel for background thread
+        let c_channel_id = Some(10);
+        let mut sub_channel = match mq_connection_ca.add_channel(c_channel_id).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("main: Error occurred while adding sub channel w/ id {} in calc thread: {}", c_channel_id.unwrap(), e);
+                process::exit(1);
+            }
+        };
+        println!("sub Channel Created on Calculations Thread");
+
+        //declare a new channel for publishing from background thread
+        let cfw_channel_id = Some(11);
+        let mut pub_channel = match mq_connection_ca.add_channel(cfw_channel_id).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("main: Error occurred while adding pub channel w/ id {} in calc thread: {}", cfw_channel_id.unwrap(), e);
+                process::exit(1);
+            }
+        };
+
+        let _ = match mq_connection_ca.add_queue(sub_channel.as_mut().unwrap(), queue_name, calc_routing_key, exchange_name).await {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
+                process::exit(1);
+            }
+        };
+        println!("Queue Created on Calculations Thread");
+
+
+        //Replace with calculation queue
+        let calc_queue = calc_queue.clone();
+        //let writing_queue = writing_queue.clone();
+        //match writing_queue.lock().await.process_queue(sub_channel.as_mut().unwrap(), pub_channel.as_mut().unwrap()).await {
+        //    Ok(_) => {},
+        //    Err(e) => {
+        //        eprintln!("main: Error occurred while WritingQueue::processing queue: {}", e);
+        //        process::exit(1);
+        //    }
+        //};
+    });
 
    //Add Streaming step 
 
