@@ -3,7 +3,7 @@ extern crate tokio;
 extern crate serde_json;
 extern crate std;
 
-use amqprs::channel::{BasicConsumeArguments, Channel, BasicAckArguments};
+use amqprs::channel::{BasicConsumeArguments, Channel, BasicAckArguments, BasicCancelArguments};
 use tokio::sync::{mpsc::Sender, oneshot, Mutex};
 use serde_json::Value;
 use std::{str, sync::Arc};
@@ -48,10 +48,13 @@ impl<'a> CalcQueue<'a> {
 
         //consuming behavior defined here
         let (ctag, mut messages_rx) = channel.basic_consume_rx(args.clone()).await?;
-        while let Some(delivery) = messages_rx.recv().await {
-            let content = match delivery.content {
+        while let Some(deliver) = messages_rx.recv().await {
+            let content = match deliver.content {
                 Some(x) => x,
-                None => continue,
+                None => {
+                    println!("calc_queue::process_queue - None unwrapped from content");
+                    continue;
+                },
             };
 
             //unserialize delivery
@@ -77,7 +80,16 @@ impl<'a> CalcQueue<'a> {
 
             if unserialized_content.is_null() || unserialized_content["key"].is_null() {
                 println!("calc_queue::process_queue - key is null! for the following delivery: {}", unserialized_content);
-                let args = BasicAckArguments::new(delivery.deliver.unwrap().delivery_tag(), false);
+                
+                let delivery = match deliver.deliver {
+                    Some(x) => x,
+                    None => {
+                        println!("calc_queue::process_queue - deliver was None");
+                        continue;
+                    },
+
+                };
+                let args = BasicAckArguments::new(delivery.delivery_tag(), false);
 
                 match channel.basic_ack(args).await {
                     Ok(_) => {},
@@ -86,14 +98,23 @@ impl<'a> CalcQueue<'a> {
                         println!("{}", msg);
                     }
                 };
+                continue;
 
             } else {
                 //Add main consumer logic here
                 
                 //process_func()
                 
+                let delivery = match deliver.deliver {
+                    Some(x) => x,
+                    None => {
+                        println!("calc_queue::process_queue - deliver was None");
+                        continue;
+                    },
 
-                let args = BasicAckArguments::new(delivery.deliver.unwrap().delivery_tag(), false);
+                };
+                
+                let args = BasicAckArguments::new(delivery.delivery_tag(), false);
                 match channel.basic_ack(args).await {
                     Ok(_) => {}
                     Err(e) => {
@@ -101,12 +122,25 @@ impl<'a> CalcQueue<'a> {
                         println!("{}", msg);
                     },
                 };
+                continue;
             }
 
 
         }
+        if !channel.is_open() {
+            println!("calc_queue::process_queue - Channel closed");
+            dbg!(ctag);
+            return Ok(());
+            
+        } else if let Err(e) = channel.basic_cancel(BasicCancelArguments::new(&ctag)).await {
+            let msg = format!("calc_queue::process_queue - Error occurred while cancelling consumer: {}", e);
+            println!("{}", msg);
+            return Err(msg.into());
+        } else {
+            println!("calc_queue::process_queue - done");
+            Ok(())
+        }
 
-        Ok(())
         
     }
 }
