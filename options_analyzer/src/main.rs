@@ -486,7 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
    let elapsed_time = now.elapsed();
    println!("Elapsed time: {:.2?}", elapsed_time);
    
-   //close connection after publishing TODO: possibly move to end?
+   //close connection after publishing 
    match block_on(signal::ctrl_c()) {
            Ok(()) => {
                match mq_connection.lock().await.close_connections().await {

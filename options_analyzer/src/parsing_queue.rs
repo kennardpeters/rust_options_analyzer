@@ -28,6 +28,7 @@ pub struct ParsingQueue<'a> {
     sub_tx: Sender<SubChannelCommand>, //tx used to subscribe from queue
     pub_tx: Sender<PubChannelCommand>, //tx used to publish content to next queue
     cache_tx: Sender<Command>, //tx used for sending /receiving contracts from cache
+    publish_next_queue: bool,
 }
 
 static CONSUMER_TAG: &str = "parser";
@@ -41,7 +42,12 @@ impl<'a> ParsingQueue<'a> {
             sub_tx,
             pub_tx,
             cache_tx,
+            publish_next_queue: true,
         }
+    }
+
+    pub fn toggle_publishing(&mut self) {
+        self.publish_next_queue = !self.publish_next_queue;
     }
 
     pub fn new_args(name: &str) -> BasicConsumeArguments {
@@ -358,41 +364,46 @@ impl<'a> Queue for ParsingQueue<'a> {
                     return Err(future_err(msg));
                 },
             };
-            let e_content = String::from(
-                format!(
-                    r#"
-                        {{
-                            "publisher": "parsing",
-                            "key": {:?}
-                        }}
-                    "#,
-                    next_key 
-                )
-            ).into_bytes();
 
-            let (pub_resp_tx, pub_resp_rx) = oneshot::channel(); 
+            if self.publish_next_queue {
 
-            let cmd = mq::PubChannelCommand::Publish { 
-                queue_name: String::from(self.queue_name()), 
-                content: e_content, 
-                resp: pub_resp_tx,
-            };
+                let e_content = String::from(
+                    format!(
+                        r#"
+                            {{
+                                "publisher": "parsing",
+                                "key": {:?}
+                            }}
+                        "#,
+                        next_key 
+                    )
+                ).into_bytes();
 
-            //Publish to next queue
-            match self.pub_tx.send(cmd).await {
-                Ok(()) => (),
-                Err(e) => {
-                    let msg = format!("parsing_queue::process_func - Error occurred while sending content to the next queue from queue: {} - {}", self.queue_name(), e);
-                    return Err(future_err(msg));
-                }
-            };
-            let resp = match pub_resp_rx.await {
-                Ok(x) => x,
-                Err(e) => {
-                    let msg = format!("parsing_queue::process_func - Error occurred while awaiting result of send item to the next queue: {}", e);
-                    return Err(future_err(msg));
-                },
-            };
+                let (pub_resp_tx, pub_resp_rx) = oneshot::channel(); 
+
+                let cmd = mq::PubChannelCommand::Publish { 
+                    queue_name: String::from(self.queue_name()), 
+                    content: e_content, 
+                    resp: pub_resp_tx,
+                };
+
+                //Publish to next queue
+                match self.pub_tx.send(cmd).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        let msg = format!("parsing_queue::process_func - Error occurred while sending content to the next queue from queue: {} - {}", self.queue_name(), e);
+                        return Err(future_err(msg));
+                    }
+                };
+                let resp = match pub_resp_rx.await {
+                    Ok(x) => x,
+                    Err(e) => {
+                        let msg = format!("parsing_queue::process_func - Error occurred while awaiting result of send item to the next queue: {}", e);
+                        return Err(future_err(msg));
+                    },
+                };
+            }
+            
 
         }
 
@@ -404,7 +415,7 @@ impl<'a> Queue for ParsingQueue<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mq::{publish_to_queue, MQConnection};
+    use crate::{err_loc, mq::{publish_to_queue, MQConnection}};
 
 
     use bytes::Bytes;
@@ -467,206 +478,251 @@ mod tests {
     }
 
 
-    //#[tokio::test(flavor = "multi_thread", worker_threads=3)]
+    #[tokio::test(flavor = "multi_thread", worker_threads=3)]
     //#[ignore = "polls forever on cloud"]
-    //async fn test_process() {
-    //    // create an mq connection
-    //    let mut mq_connection = Arc::new(Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
-    //    //Publishing logic
-    //    let conn_result = match mq_connection.lock().await.open().await {
-    //        Ok(v) => v,
-    //        Err(e) => {
-    //            println!("parsing_queue::test_process - Error occurred while opening connection: {}", e);
-    //            return;
-    //        }
-    //    };
-    //    assert_eq!(conn_result, ());
-    //    
-    //    // clone a channel to be used for publishing
-    //    let mut mq_connection_p = mq_connection.clone();
+    async fn test_process_func() {
+        // create an mq connection
+        let mut mq_connection = Arc::new(Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
+        //Publishing logic
+        let conn_result = match mq_connection.lock().await.open().await {
+            Ok(v) => v,
+            Err(e) => {
+                panic!("parsing_queue::test_process - Error occurred while opening connection: {} - {}", e, err_loc!());
+                return;
+            }
+        };
+        assert_eq!(conn_result, ());
+        
+        // spin up fake http server to scrape with queue
+        let mock_server = tokio::spawn(async move {
+            let listener = TokioTcpListener::bind("127.0.0.1:7878").await.unwrap();
 
-    //    let mut pub_channel = match mq_connection_p.lock().await.add_channel(Some(2)).await {
-    //        Ok(v) => Some(v),
-    //        Err(e) => {
-    //            println!("parsing_queue::test_process - Error occurred while adding channel: {}", e);
-    //            None
-    //        }
-    //    };
-    //    assert!(pub_channel.is_some());
+            loop {
+                if let Ok((stream, addr)) = listener.accept().await {
+                    let io = TokioIo::new(stream);
+                    println!("Addr: {:?}", addr);
 
-    //    // create a cache channel
-    //    let (tx, mut rx) = mpsc::channel::<Command>(32);
-    //    //Instantiate cache
-    //    let mut scraped_cache = Arc::new(tokio::sync::Mutex::new(ScrapedCache::new(100)));
-    //    //Create caching thread
-    //    tokio::spawn(async move {
-    //       while let Some(cmd) = rx.recv().await {
-    //            match cmd {
-    //                scraped_cache::Command::Get { key, resp } => {
+                    tokio::task::spawn(async move {
+                        if let Err(err) = http1::Builder::new()
+                        .serve_connection(io, service_fn(tokio_handle_client))
+                        .await
+                        {
+                            print!("parsing_queue::test_process - Failed to serve connection: {:?}", err);
+                        }
+                    });
+                } else {
+                    eprint!("parsing_queue::test_process - Error reading tcp stream!");
+                }
 
-    //                    let res = scraped_cache.lock().await.get(&key).await.cloned();
-    //                    //Switch out later
+            }
 
-    //                    let respx = resp.send(Ok(res)); 
-    //                    dbg!(respx);
-    //                }
-    //                scraped_cache::Command::Set { key, value, resp } => {
-    //                    let res = scraped_cache.lock().await.set(key, value).await;
-
-    //                    let _ = resp.send(Ok(()));
-
-    //                }
-    //            }
-    //           
-    //       } 
-    //    });
-
-    //    
-    //    // spin up fake http server to scrape with queue
-    //    let mock_server = tokio::spawn(async move {
-    //        let listener = TokioTcpListener::bind("127.0.0.1:7878").await.unwrap();
-
-    //        loop {
-    //            if let Ok((stream, addr)) = listener.accept().await {
-    //                let io = TokioIo::new(stream);
-    //                println!("Addr: {:?}", addr);
-
-    //                tokio::task::spawn(async move {
-    //                    if let Err(err) = http1::Builder::new()
-    //                    .serve_connection(io, service_fn(tokio_handle_client))
-    //                    .await
-    //                    {
-    //                        print!("parsing_queue::test_process - Failed to serve connection: {:?}", err);
-    //                    }
-    //                });
-    //            } else {
-    //                eprint!("parsing_queue::test_process - Error reading tcp stream!");
-    //            }
-
-    //        }
-
-    //        Ok::<(), std::io::Error>(())
-    //        
-    //        
-    //    });
-
-    //    // create a queue item and publish to the queue
-    //    let queue_name = "parsing_queue";
-    //    let exchange_name = "amq.direct";
+            Ok::<(), std::io::Error>(())
+            
+            
+        });
 
 
-    //    let content = String::from(
-    //        r#"
-    //            {
-    //                "publisher": "parsing_queue::test_process",
-    //                "data": "Hello, amqprs!",
-    //                "symbol": "test_option"
-    //            }
-    //        "#,
-    //    ).into_bytes();
+        //Create publishing mpsc channel
+        let (pub_tx, mut pub_rx) = mpsc::channel::<PubChannelCommand>(128);
+        //Create subription mpsc channel
+        let (sub_tx, mut sub_rx) = mpsc::channel::<SubChannelCommand>(128);
+        // create a cache channel
+        let (cache_tx, mut cache_rx) = mpsc::channel::<Command>(32);
 
-    //    match publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, queue_name, content).await {
-    //        Ok(_) => {},
-    //        Err(e) => {
-    //            let msg = format!("parsing_queue::test_process - Error occurred while publishing to queue: {}", e);
-    //            println!("{}", msg);
-    //        },
-    //    };
-    //    //futures::join!(mock_server, publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, queue_name, content));
+        //Create publishing thread
+        let mq_connection_p = mq_connection.clone();
+        let t1 = tokio::spawn(async move {
+            while let Some(cmd) = pub_rx.recv().await {
+                match cmd {
+                    PubChannelCommand::Publish { queue_name, content, resp } => {
+                        //pass in current queue name and content to publish_to_next_queue func
+                        //open a channel
+                        //send content and return result of send
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_p.lock().await.publish_to_next_queue(&queue_name, content).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                let msg = format!("Error while publishing from queue: {}", queue_name);
+                                panic!("{} - {}", msg, err_loc!())
+                            }
+                        };
+                        continue;
+                    
+                    }
+                }
+            }
+        });
 
-    //    let mut mq_connection_c = mq_connection.clone();
-    //    let mut parsing_queue = Arc::new(Mutex::new(ParsingQueue::new(queue_name, queue_name, exchange_name, tx.clone())));
-    //    let parshing_thread = tokio::spawn(async move {
-    //        let mut mq_connection_c = mq_connection_c.lock().await;
+        //Create subscription thread
+        let mq_connection_s = mq_connection.clone();
+        let t2 = tokio::spawn(async move {
+            while let Some(cmd) = sub_rx.recv().await {
+                match cmd {
+                    SubChannelCommand::Open { queue_name, resp } => {
+                        //open a channel
+                        //declare a queue on the channel
+                        let channel: Result<Channel, Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.add_sub_channel_and_queue(&queue_name).await {
+                            Ok(v) => Ok(v),
+                            Err(e) => {
+                                panic!("Error while opening channel and adding queue: {} - {}", e, err_loc!());
+                            }
 
-    //        //declare new channel for background thread
-    //        let p_channel_id = Some(49);
-    //        let mut sub_channel = match mq_connection_c.add_channel(p_channel_id).await {
-    //            Ok(c) => Some(c),
-    //            Err(e) => {
-    //                panic!("parsing_queue::test_process: Error occurred while adding channel w/ id {} in parsing thread: {}", p_channel_id.unwrap(), e);
-    //                None
-    //            }
-    //        };
-    //        println!("Sub Channel Created on Parsing Thread");
+                        };
+                        //send channel back to sender
+                        let res = match resp.send(channel) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                panic!("subscription_thread: Error while sending channel to queue: {} for subscribing - {}", &queue_name, err_loc!())
 
-    //        //declare new channel for publishing from background thread
-    //        let pfs_channel_id = Some(5);
-    //        let mut pub_from_sub_channel = match mq_connection_c.add_channel(pfs_channel_id).await {
-    //            Ok(c) => Some(c),
-    //            Err(e) => {
-    //                panic!("parsing_queue::test_process: Error occurred while adding channel w/ id {} in parsing thread: {}", p_channel_id.unwrap(), e);
-    //                None
-    //            }
-    //        };
-    //        println!("Pub from Sub Channel Created on Parsing Thread");
+                            },
+                        };
+                        continue;
+                    }
+                    SubChannelCommand::Close { queue_name, channel, resp } => {
+                        //close the channel passed in
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.close_channel(channel).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                panic!("Error while opening channel and adding queue: {} - {} - {}", queue_name, e, err_loc!());
+                            }
+                        };
+                        continue;
 
-    //        let parsing_routing_key = "parsing_queue";
+                    }
+                }
+           }
+        });
 
-    //        //Add queue to background thread 
-    //        let _ = match mq_connection_c.add_queue(sub_channel.as_mut().unwrap(), queue_name, parsing_routing_key, "amq.direct").await {
-    //            Ok(_) => {},
-    //            Err(e) => {
-    //                panic!("parsing_queue::test_process: Error occurred while adding queue w/ name {}: {}", queue_name, e);
-    //            }
-    //        };
-    //        println!("Queue Created on Parsing Thread");
-    //        let parsing_queue = parsing_queue.clone();
-    //        match parsing_queue.lock().await.process_queue(sub_channel.as_mut().unwrap(), pub_from_sub_channel.as_mut().unwrap()).await {
-    //            Ok(_) => {},
-    //            Err(e) => {
-    //                panic!("parsing_queue::test_process: Error occurred while ParsingQueue::processing queue: {}", e);
-    //            }
-    //        };
+        //Instantiate cache
+        let mut scraped_cache = Arc::new(tokio::sync::Mutex::new(ScrapedCache::new(100)));
+        //Create caching thread
+        tokio::spawn(async move {
+           while let Some(cmd) = cache_rx.recv().await {
+                match cmd {
+                    scraped_cache::Command::Get { key, resp } => {
 
-    //    });
+                        let res = scraped_cache.lock().await.get(&key).await.cloned();
+                        //Switch out later
 
-    //    dbg!(parshing_thread.await.is_ok());
-    //    
-    //    // Verify the cache is updated with the data we expected to be scraped
-    //    let (resp_tx, resp_rx) = oneshot::channel();
-    //    let command = scraped_cache::Command::Get {
-    //        key: "testcontract2020".to_string(),
-    //        resp: resp_tx,
-    //    };
-    //    let txc = tx.clone();
-    //    match txc.send(command).await {
-    //        Ok(_) => {},
-    //        Err(e) => {
-    //            let msg = format!("parsing_queue::test_process - Error occurred while requesting contract from cache: {}", e);
-    //            println!("{}", msg);
-    //        },
-    //    };
-    //    let resp = match resp_rx.await {
-    //        Ok(x) => x,
-    //        Err(e) => {
-    //            let msg = format!("parsing_queue::test_process - Error occurred while receiving contract from cache: {}", e);
-    //            println!("{}", msg);
-    //            Err(()) 
-    //        },
-    //    };
-    //    //TODO: Fix unwrapping
-    //    let contract = match resp {
-    //        Ok(x) => {
-    //            if x.is_some() {
-    //                x.unwrap()
-    //            } else {
-    //                println!("parsing_queue::test_process - Unwrapped None! from Cache");
-    //                Contract::new()
-    //            }
-    //        },
-    //        Err(e) => {
-    //            let msg = format!("parsing_queue::test_process - Error occurred while receiving contract from cache: {:?}", e);
-    //            panic!("{}", msg);
-    //            Contract::new()
-    //        },
-    //    };
+                        let respx = resp.send(Ok(res)); 
+                        dbg!(respx);
+                    }
+                    scraped_cache::Command::Set { key, value, resp } => {
+                        let res = scraped_cache.lock().await.set(key, value).await;
 
-    //    //Shut down mock server running in the background
-    //    mock_server.abort();
+                        let _ = resp.send(Ok(()));
 
-    //    assert_eq!(contract.strike, 440.0);
-    //}
+                    }
+                }
+               
+           } 
+        });
+
+        
+        // create a queue item and publish to the queue
+        let queue_name = "parsing_queue";
+        let exchange_name = "amq.direct";
+
+
+        let content = String::from(
+            r#"
+                {
+                    "publisher": "parsing_queue::test_process",
+                    "symbol": "test_option"
+                }
+            "#,
+        ).into_bytes();
+
+
+        let (resp_tx, _) = oneshot::channel();
+
+        let cmd = PubChannelCommand::Publish {
+            queue_name: String::from(""),
+            content,
+            resp: resp_tx,
+
+        };
+        
+
+        match pub_tx.send(cmd).await {
+            Ok(_) => (),
+            Err(e) => {
+                panic!("parsing_queue::test_process - Error occurred while publishing to queue: {} - {}", e, err_loc!()); 
+            }
+        }
+
+
+        let parsing_pub_tx = pub_tx.clone();
+        let parsing_sub_tx = sub_tx.clone();
+        let parsing_cache_tx = cache_tx.clone();
+        let parshing_thread = tokio::spawn(async move {
+            let mut parsing_queue = ParsingQueue::new(queue_name, queue_name, exchange_name, parsing_sub_tx, parsing_pub_tx, parsing_cache_tx);
+
+            //turn publishing to next queue off
+            parsing_queue.toggle_publishing();
+
+            match parsing_queue.process_queue().await {
+                Ok(_) => {},
+                Err(e) => {
+                    panic!("parsing_queue::test_process: Error occurred while ParsingQueue::processing_queue: {}", e);
+                }
+            };
+
+        });
+
+        let mut contract: Option<Contract> = None;
+
+        loop {
+            // Verify the cache is updated with the data we expected to be scraped
+            let (cache_resp_tx, cache_resp_rx) = oneshot::channel();
+            let command = scraped_cache::Command::Get {
+                key: "testcontract2020".to_string(),
+                resp: cache_resp_tx,
+            };
+            let txc = cache_tx.clone();
+            match cache_tx.send(command).await {
+                Ok(_) => {},
+                Err(e) => {
+                    panic!("parsing_queue::test_process - Error occurred while requesting contract from cache: {} - {}", e, err_loc!());
+                },
+            };
+            let resp = match cache_resp_rx.await {
+                Ok(x) => x,
+                Err(e) => {
+                    panic!("parsing_queue::test_process - Error occurred while receiving contract from cache: {} - {}", e, err_loc!());
+                },
+            };
+            contract = match resp {
+                Ok(x) => {
+                    x
+                },
+                Err(e) => {
+                    panic!("parsing_queue::test_process - Error occurred while receiving contract from cache: {:?} - {}", e, err_loc!());
+                },
+            };
+            if contract.is_some() {
+               break;
+            } else {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                continue;
+            }
+        };
+        let parsed_contract = contract.unwrap();
+
+        //Shut down mock server running in the background
+        mock_server.abort();
+
+        assert_eq!(parsed_contract.strike, 440.0);
+
+        //close connection
+        match mq_connection.lock().await.close_connections().await {
+            Ok(_) => {
+                Ok::<(), std::io::Error>(())
+            },
+            Err(e) => {
+                panic!("parsing_queue::test_process - error while closing mq connection: {} - {}", e, err_loc!());
+            }
+        };
+    }
 }
 
 //Deprecated Struct used for old consumer pattern
