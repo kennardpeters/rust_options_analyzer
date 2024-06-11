@@ -712,6 +712,7 @@ mod tests {
 
     use super::*;
     use crate::err_loc;
+    use futures::future::join_all;
     use tokio::sync::mpsc;
     #[macro_use(err_loc)]
 
@@ -897,16 +898,21 @@ mod tests {
                 panic!("{}, error: main: Error while opening connection to rabbitmq: {}", err_loc!(), e);
             }
         };
+        enum TestCommand {
+            Send {
+                message_received: i64,
+            },
+        }
         // declare a fake queue that implements Queue trait
         struct FakeQueue {
             name: String,
-            messages_consumed: u32,
+            message_tx: Sender<TestCommand>,
         }
         impl FakeQueue {
-            fn new(name: String) -> FakeQueue {
+            fn new(name: String, message_tx: Sender<TestCommand>) -> FakeQueue {
                 FakeQueue {
                     name,
-                    messages_consumed: 0,
+                    message_tx,
                 }
             }
         }
@@ -923,13 +929,15 @@ mod tests {
             }
             async fn process_func(&self, _deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>>  {
                 //TODO: publish messages back to main testing thread
+                let cmd = TestCommand::Send { message_received: 1 };
+                match self.message_tx.send(cmd).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        panic!("{} - {}", e, err_loc!());
+                    }
+                };
                 Ok(())
             }
-        }
-        enum TestCommand {
-            Send {
-                message_received: i64,
-            },
         }
         
 
@@ -952,15 +960,7 @@ mod tests {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 let msg = format!("Error while publishing from queue: {}", queue_name);
-                                Err(future_err(msg))
-                            }
-                        };
-                        //send result back to sender
-                        let _ = match resp.send(response) {
-                            Ok(()) => (),
-                            Err(e) => {
-                                let msg = format!("Error while sending result of publish to queue: {}", &queue_name);
-                                panic!("{}", msg);
+                                panic!("{} - {}", msg, err_loc!())
                             }
                         };
                         continue;
@@ -980,8 +980,7 @@ mod tests {
                         let channel: Result<Channel, Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.add_sub_channel_and_queue(&queue_name).await {
                             Ok(v) => Ok(v),
                             Err(e) => {
-                                let msg = format!("Error while opening channel and adding queue: {}", e);
-                                Err(future_err(msg))
+                                panic!("Error while opening channel and adding queue: {} - {}", e, err_loc!());
                             }
 
                         };
@@ -989,8 +988,7 @@ mod tests {
                         let res = match resp.send(channel) {
                             Ok(()) => (),
                             Err(e) => {
-                                let msg = format!("subscription_thread: Error while sending channel to queue: {} for subscribing", &queue_name);
-                                panic!("{}", msg);
+                                panic!("subscription_thread: Error while sending channel to queue: {} for subscribing - {}", &queue_name, err_loc!())
 
                             },
                         };
@@ -1001,11 +999,9 @@ mod tests {
                         let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.close_channel(channel).await {
                             Ok(()) => Ok(()),
                             Err(e) => {
-                                let msg = format!("Error while opening channel and adding queue: {} - {}", queue_name, e);
-                                Err(future_err(msg))
+                                panic!("Error while opening channel and adding queue: {} - {} - {}", queue_name, e, err_loc!());
                             }
                         };
-                        //TODO: send result back to sender
                         continue;
 
                     }
@@ -1026,32 +1022,64 @@ mod tests {
                 "#,
                 &i)
             ).into_bytes();
-            pub_tx.send(PubChannelCommand::Publish {
+            let cmd = PubChannelCommand::Publish {
                 queue_name: String::from(""),
                 content,
                 resp: resp_tx,
-            });
+            };
+            match pub_tx.send(cmd).await {
+                Ok(_) => (),
+                Err(e) => {
+                    panic!("Error while publishing message: {} - {}", e, err_loc!()); 
+                }
+
+            };
             
         }
 
         // consume messages
         let t3 = tokio::spawn(async move {
-            let mut fq = FakeQueue::new("parsing_queue".to_string());
+            let mut fq = FakeQueue::new("parsing_queue".to_string(), sending_tx);
 
             match consume_from_queue(fq.args(), sub_tx, &fq).await {
                 Ok(()) => (),
                 Err(e) => {
-                    panic!("{}", e);
+                    panic!("{} - {}", e, err_loc!());
                 }
             };
 
-            Ok::<(), std::io::Error>(())
+            //Ok::<(), std::io::Error>(())
 
         });
         // ack messages
+        let mut total_messages: i64 = 0;
+        while let Some(cmd) = sending_rx.recv().await {
+            match cmd {
+                TestCommand::Send { message_received } => {
+
+                    total_messages += message_received;
+                    if total_messages >= 10 {
+                        break;
+                    }
+                    
+                }
+            }
+        }
+
+        assert_eq!(10, total_messages);
+        println!("{}", &total_messages);
+
         
         
         // close channels
+        match mq_connection.lock().await.close_connections().await {
+            Ok(_) => {
+                Ok::<(), std::io::Error>(())
+            },
+            Err(e) => {
+                panic!("{} - {}", e, err_loc!());
+            }
+        };
         
     }
 
