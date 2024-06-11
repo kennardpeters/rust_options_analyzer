@@ -598,10 +598,6 @@ pub async fn consume_from_queue(consumer_args: BasicConsumeArguments, sub_tx: Se
         };
     }
 
-    //time::sleep(time::Duration::from_secs(30)).await;
-
-    //dbg
-
     //Need a context like struct here
     if let Err(e) = channel.basic_cancel(BasicCancelArguments::new(&ctag)).await {
         let msg = format!("parsing_queue::process_queue - Error occurred while cancelling consumer: {}", e);
@@ -652,7 +648,8 @@ async fn nack_delivery(deliver: ConsumerMessage, channel: &Channel) -> Result<()
 
     };
 
-    //Requeue = 3rd argument: TODO set to true here after fixing logic
+    //Requeue = 3rd argument: TODO set to true here after fixing logic in order to requeue after
+    //errors
     let args = BasicNackArguments::new(delivery.delivery_tag(), false, false);
 
     //Perform nack
@@ -668,8 +665,7 @@ async fn nack_delivery(deliver: ConsumerMessage, channel: &Channel) -> Result<()
 }
 
 
-//Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
-//TODO: Refactor this trait to new structure
+//Trait to implement for each queue step 
 #[async_trait]
 pub trait Queue {
     //Declare a new queue
@@ -710,9 +706,14 @@ pub trait Queue {
 //Requires RabbitMQ container to be running
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use amqprs::consumer::DefaultConsumer;
 
     use super::*;
+    use crate::err_loc;
+    use tokio::sync::mpsc;
+    #[macro_use(err_loc)]
 
     use reqwest::Client;
     use serde_json::Value;
@@ -877,6 +878,181 @@ mod tests {
 
         channel.close().await.unwrap();
         mq.close_connections().await.unwrap();
+    }
+
+    //add_sub_channel_and_queue
+    //add_pub_channel_and_queue
+    //publish_to_next_queue
+    //close_channel
+    //consume_from_queue
+    //ack_delivery
+    //nack_delivery
+    #[tokio::test]
+    async fn test_consume_from_queue() {
+        // create and open an MQ connection
+        let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
+        match mq_connection.lock().await.open().await {
+            Ok(_) => (),
+            Err(e) => {
+                panic!("{}, error: main: Error while opening connection to rabbitmq: {}", err_loc!(), e);
+            }
+        };
+        // declare a fake queue that implements Queue trait
+        struct FakeQueue {
+            name: String,
+            messages_consumed: u32,
+        }
+        impl FakeQueue {
+            fn new(name: String) -> FakeQueue {
+                FakeQueue {
+                    name,
+                    messages_consumed: 0,
+                }
+            }
+        }
+        #[async_trait]
+        impl Queue for FakeQueue {
+            fn queue_name(&self) -> &str {
+                &self.name
+            }
+            fn args(&self) -> BasicConsumeArguments {
+                BasicConsumeArguments::new(
+                    "parsing_queue",
+                    "test_consumer_tag",
+                )
+            }
+            async fn process_func(&self, _deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>>  {
+                //TODO: publish messages back to main testing thread
+                Ok(())
+            }
+        }
+        enum TestCommand {
+            Send {
+                message_received: i64,
+            },
+        }
+        
+
+        // create a publishing mpsc channel
+        let (pub_tx, mut pub_rx) = mpsc::channel::<PubChannelCommand>(128);
+        // create a subscription mpsc channel
+        let (sub_tx, mut sub_rx) = mpsc::channel::<SubChannelCommand>(128);
+
+        let (sending_tx, mut sending_rx) = mpsc::channel::<TestCommand> (128);
+        // create publishing thread
+        let mq_connection_p = mq_connection.clone();
+        let t1 = tokio::spawn(async move {
+            while let Some(cmd) = pub_rx.recv().await {
+                match cmd {
+                    PubChannelCommand::Publish { queue_name, content, resp } => {
+                        //pass in current queue name and content to publish_to_next_queue func
+                        //open a channel
+                        //send content and return result of send
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_p.lock().await.publish_to_next_queue(&queue_name, content).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                let msg = format!("Error while publishing from queue: {}", queue_name);
+                                Err(future_err(msg))
+                            }
+                        };
+                        //send result back to sender
+                        let _ = match resp.send(response) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                let msg = format!("Error while sending result of publish to queue: {}", &queue_name);
+                                panic!("{}", msg);
+                            }
+                        };
+                        continue;
+                    
+                    }
+                }
+            }
+        });
+        // create subscription thread
+        let mq_connection_s = mq_connection.clone();
+        let t2 = tokio::spawn(async move {
+            while let Some(cmd) = sub_rx.recv().await {
+                match cmd {
+                    SubChannelCommand::Open { queue_name, resp } => {
+                        //open a channel
+                        //declare a queue on the channel
+                        let channel: Result<Channel, Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.add_sub_channel_and_queue(&queue_name).await {
+                            Ok(v) => Ok(v),
+                            Err(e) => {
+                                let msg = format!("Error while opening channel and adding queue: {}", e);
+                                Err(future_err(msg))
+                            }
+
+                        };
+                        //send channel back to sender
+                        let res = match resp.send(channel) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                let msg = format!("subscription_thread: Error while sending channel to queue: {} for subscribing", &queue_name);
+                                panic!("{}", msg);
+
+                            },
+                        };
+                        continue;
+                    }
+                    SubChannelCommand::Close { queue_name, channel, resp } => {
+                        //close the channel passed in
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.close_channel(channel).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                let msg = format!("Error while opening channel and adding queue: {} - {}", queue_name, e);
+                                Err(future_err(msg))
+                            }
+                        };
+                        //TODO: send result back to sender
+                        continue;
+
+                    }
+                }
+           }
+        });
+        
+        // create a list of messages
+        // publish messages
+        for i in 0..10 {
+            let (resp_tx, _) = oneshot::channel();
+            let content = String::from(
+                format!(r#"
+                    {{
+                        "publisher": "main",
+                        "symbol": {:?} 
+                    }}
+                "#,
+                &i)
+            ).into_bytes();
+            pub_tx.send(PubChannelCommand::Publish {
+                queue_name: String::from(""),
+                content,
+                resp: resp_tx,
+            });
+            
+        }
+
+        // consume messages
+        let t3 = tokio::spawn(async move {
+            let mut fq = FakeQueue::new("parsing_queue".to_string());
+
+            match consume_from_queue(fq.args(), sub_tx, &fq).await {
+                Ok(()) => (),
+                Err(e) => {
+                    panic!("{}", e);
+                }
+            };
+
+            Ok::<(), std::io::Error>(())
+
+        });
+        // ack messages
+        
+        
+        // close channels
+        
     }
 
 }
