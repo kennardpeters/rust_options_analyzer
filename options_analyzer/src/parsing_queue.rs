@@ -626,7 +626,7 @@ mod tests {
         let content = String::from(
             r#"
                 {
-                    "publisher": "parsing_queue::test_process",
+                    "publisher": "parsing_queue::test_process_func",
                     "symbol": "test_option"
                 }
             "#,
@@ -654,7 +654,7 @@ mod tests {
         let parsing_pub_tx = pub_tx.clone();
         let parsing_sub_tx = sub_tx.clone();
         let parsing_cache_tx = cache_tx.clone();
-        let parshing_thread = tokio::spawn(async move {
+        let parsing_thread = tokio::spawn(async move {
             let mut parsing_queue = ParsingQueue::new(queue_name, queue_name, exchange_name, parsing_sub_tx, parsing_pub_tx, parsing_cache_tx);
 
             //turn publishing to next queue off

@@ -4,18 +4,20 @@ extern crate tokio;
 extern crate sqlx;
 
 use std::ops::Deref;
+use std::str::FromStr;
 
 pub use crate::options_scraper::UnparsedContract;
 use serde::{Serialize, Deserialize};
-use chrono::{NaiveDateTime, DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use chrono::format::ParseError;
+use sqlx::types::time::Time;
 use sqlx::Row;
 use tokio::sync::{mpsc::Sender, oneshot};
 use sqlx::postgres::PgRow;
 
  #[derive(Debug, Serialize, Deserialize, Clone)]
  pub struct Contract {
-     pub timestamp: i64,
+     pub timestamp: DateTime<Utc>,
      pub contract_name: String,
      pub last_trade_date: String, //string to date
      pub strike: f64, //string to float
@@ -33,7 +35,7 @@ use sqlx::postgres::PgRow;
 impl Contract {
     pub fn new() -> Self {
         Self {
-            timestamp: 0,
+            timestamp: Utc::now(),
             contract_name: "".to_string(),
             last_trade_date: "".to_string(),
             strike: 0.0,
@@ -53,7 +55,7 @@ impl Contract {
         contract
     }
     pub fn parse(&mut self, unparsed: &UnparsedContract) {
-        self.timestamp = unparsed.timestamp;
+        self.timestamp = Utc::now();
         self.contract_name = unparsed.contract_name.clone();
         //need to parse this out using chronos package
         //self.last_trade_date = NaiveDateTime::parse_from_str(unparsed.last_trade_date.replace("EDT", "").clone(), "%Y-%m-%d %H:%M").unwrap().format("%Y-%m-%d").to_string(); //unparsed.last_trade_date;
