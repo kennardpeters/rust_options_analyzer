@@ -381,31 +381,6 @@ fn process_bytes(stringed: String) -> Result<TimeSeries, Box<dyn std::error::Err
     })
 }
 
-//#[derive(Deserialize)]
-//struct Config {
-//    reqwest_headers: HashMap<String, String>,
-//    queues: HashMap<i64, String>
-//}
-//
-//fn get_reqwest_headers() -> Result<HashMap<String, String>, Box<dyn std::error::Error>>{
-//    let contents = match fs::read_to_string("config.toml") {
-//        Ok(v) => v,
-//        Err(e) => {
-//            let msg = format!("options_scraper::get_reqwest_headers() - Failed to read config.toml file - {}", e);
-//            return Err(msg.into());
-//        }
-//    };
-//    let config: Config = match toml::from_str(&contents) {
-//        Ok(v) => v,
-//        Err(e) => {
-//            let msg = format!("options_scraper::get_reqwest_headers() - Failed to parse TOML from config.toml - {}", e);
-//            return Err(msg.into());
-//        }
-//    };
-//    Ok(config.reqwest_headers)
-//
-//}
-
 #[cfg(test)]
 mod tests {
     use super::*;
