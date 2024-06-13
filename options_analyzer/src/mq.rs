@@ -4,10 +4,12 @@ extern crate async_trait;
 extern crate tracing;
 extern crate serde_json;
 extern crate std;
+extern crate futures;
 
 use amqprs::{
-    callbacks::{DefaultChannelCallback, DefaultConnectionCallback}, channel::{
-        BasicAckArguments, BasicConsumeArguments, BasicPublishArguments, Channel, QueueBindArguments, QueueDeclareArguments
+    callbacks::{DefaultChannelCallback, DefaultConnectionCallback}, 
+    channel::{
+        BasicAckArguments, BasicCancelArguments, BasicConsumeArguments, BasicNackArguments, BasicPublishArguments, Channel, ConsumerMessage, QueueBindArguments, QueueDeclareArguments
     }, 
     connection::{Connection, OpenConnectionArguments}, 
     consumer::AsyncConsumer, 
@@ -15,8 +17,9 @@ use amqprs::{
     BasicProperties, 
     Deliver
 };
-use tokio::time;
-use std::{borrow::BorrowMut, str, sync::Arc};
+use futures::{channel::mpsc::SendError, executor::block_on};
+use tokio::{sync::{futures as tokio_futures, mpsc::Sender, oneshot}, time};
+use std::{borrow::BorrowMut, error::Error, fmt::{Display,Formatter}, str, sync::Arc, fs, collections::HashMap, future::Future};
 
 
 use async_trait::async_trait;
@@ -25,17 +28,95 @@ use serde_json::Value;
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use crate::parsing_queue::{self, ParsingQueue};
+//TODO: Figure out tracing here:
+//#[cfg(feature = "traces")]
+//use tracing::info;
+//use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-const QUEUE_LIST: &[&str] = &["parse_queue"];
+use crate::{config_parse, parsing_queue::{self, ParsingQueue}};
+use crate::types::Responder;
+
+//TODO: Replaced with config file
+const DEFAULT_EXCHANGE: &str = "amq.direct";
+
+
+//SubChannelCommand enum is used to opening subscription channels, declaring queues and closing subscription channels to the mq server
+pub enum SubChannelCommand {
+    Open {
+        queue_name: String,
+        resp: Responder<Channel, Box<dyn std::error::Error + Send>>
+    },
+    Close {
+        queue_name: String,
+        channel: Channel,
+        resp: Responder<(), Box<dyn std::error::Error + Send>>
+    },
+}
+
+//PubChannelCommand enum is used to open and close publishing channels to the mq server
+pub enum PubChannelCommand {
+    Publish {
+        queue_name: String,
+        content: Vec<u8>, //Possibly change to bytes
+        resp: Responder<(), Box<dyn std::error::Error + Send>>,
+    },
+}
+
+//Error wrapping for thread safety
+//#[derive(Debug, Clone)]
+//struct AsyncError {
+//    source: Option<Box<Self>>,
+//    desc: String,
+//}
+//
+//impl <E: Error + ?Sized> From<&E> for AsyncError {
+//    fn from(err: &E) -> Self {
+//        AsyncError {
+//            source: err.source().map(|x| Box::new(x.into())),
+//            desc: format!("{err}")
+//        }
+//    }
+//}
+//
+//impl <E: amqprs::error::Error + ?Sized> From<&E> for AsyncError {
+//    fn from(err: &E) -> Self {
+//        AsyncError {
+//            source: err.source()
+//        }
+//    }
+//}
+//
+//impl Error for AsyncError {
+//    fn source(&self) -> Option<&(dyn Error + 'static)> {
+//       self.source().as_ref().map(|x| &**x as &dyn Error) 
+//    }
+//
+//    fn description(&self) -> &str {
+//        self.desc.as_str()
+//    }
+//
+//    fn cause(&self) -> Option<&dyn Error> {
+//        self.source().as_ref().map(|x| &**x as &dyn Error)
+//    }
+//}
+//
+//impl Display for AsyncError {
+//    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+//        write!(f, "{}", self.desc)
+//    }
+//}
 
 //MQConnection is a struct to handle storing and opening connections to the mq server
 pub struct MQConnection<'a> {
     connection: Option<Connection>,
+    queue_sequence: Option<HashMap<i64, String>>,
+    //map of pub_channels or just one here?
     pub host: &'a str,
     pub port: u16,
     pub username: &'a str,
     pub password: &'a str
+    //sub_rx?
+    //pub_rx?
 }
 
 impl<'a> MQConnection<'a> {
@@ -48,6 +129,7 @@ impl<'a> MQConnection<'a> {
     ) -> MQConnection<'a> {
         Self { 
             connection: None,
+            queue_sequence: None,
             host,
             port,
             username,
@@ -70,32 +152,214 @@ impl<'a> MQConnection<'a> {
         connection.register_callback(DefaultConnectionCallback)
         .await?;
 
+        //Grab queue list from config file
+        let queue_sequence: HashMap<String, String> = match config_parse::get_queue_sequence() {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("mq::open(): Error while getting queue sequence - {}", e);
+                return Err(Box::from(msg));
+            },
+        };
+        let mut parsed_queue_sequence: HashMap<i64, String> = HashMap::new(); 
+        //TODO: change hackey structure to more refined approach
+        for (key, value) in queue_sequence.into_iter() {
+            if key.contains('0') {
+                parsed_queue_sequence.insert(0, value.clone());
+            }
+            if key.contains('1') {
+               parsed_queue_sequence.insert(1, value.clone());
+            }
+            if key.contains('2') {
+                parsed_queue_sequence.insert(2, value.clone());
+            }
+            if key.contains('3') {
+                parsed_queue_sequence.insert(3, value.clone());
+            }
+
+            
+        }
+        dbg!(&parsed_queue_sequence);
+        self.queue_sequence = Some(parsed_queue_sequence);
+
         self.connection = Some(connection);
 
-        //TODO: Make better return
         Ok(())
     }
 
-    //add channel method for adding a channel to an mq connection and returning the new channel
-    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
-        let connection = self.connection.clone();
+    //add_sub_channel_and_queue is used by an mq consumer thread to open a channel to the
+    //MQConnection, to declare a queue to consume from, and to return the channel to be used by the
+    //consumer
+    pub async fn add_sub_channel_and_queue(&self, queue_name: &str) -> Result<Channel, Box<dyn std::error::Error + Send>> {
+        let connection = match self.connection.clone() {
+            Some(x) => x,
+            None => {
+                //TODO: Add backtrace macro here
+                let msg = format!("mq::add_sub_channel_and_queue: Connection was None while adding channel for Queue: {}", queue_name);
+                return Err(future_err(msg));
+            },
+        };
 
-        if connection.is_some() {
-
-            let mut channel = connection.unwrap().open_channel(channel_id).await?;
-    
-            channel
-                .register_callback(DefaultChannelCallback)
-                .await?;
-
-            Ok(channel)
-        } else {
-            Err("mq::add_channel: Connection was None".into())
+        let exchange: &str = DEFAULT_EXCHANGE;
+        
+        let mut channel = match connection.open_channel(None).await {
+            Ok(v) => v,
+            Err(e) => {
+                    //TODO: Add backtrace macro here
+                    let msg = format!("mq::add_sub_channel_and_queue - Error occurred while opening channel: {}", e);
+                    return Err(future_err(msg));
+            },
+        };
+        
+        match channel
+            .register_callback(DefaultChannelCallback)
+            .await {
+            Ok(_) => (),
+            Err(e) => {
+                let msg = format!("mq::add_sub_channel_and_queue - Error occurred while registering callback: {}", e);
+                return Err(future_err(msg));
+            },
+        };
+        //Declare queue
+        let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
+            Ok(v) => {
+                if v.is_some() {
+                    v
+                } else {
+                   None 
+                }
+            },
+            Err(e) => {
+                eprintln!("mq::add_sub_channel_and_queue - Error occurred while declaring queue: {}", e);
+                None
+            } 
+        };
+        if option_args.is_none() {
+            let msg = format!("mq::add_sub_channel_and_queue - Queue: {} was None after declaring", queue_name);
+            return Err(future_err(msg)); 
         }
+        
+
+        match channel
+            .queue_bind(QueueBindArguments::new(
+                &queue_name,
+                exchange,
+                &queue_name,
+            ))
+            .await {
+                Ok(()) => (),
+                Err(e) => {
+                    let msg = format!("mq::add_sub_channel_and_queue - Error while binding queue: {} to exchange: {}", queue_name, exchange);
+                    return Err(future_err(msg)); 
+                }
+            };
+        
+
+        Ok(channel)
+    }
+    
+    //add_pub_channel_and_queue is used by an mq publishing thread to open a channel to the
+    //MQConnection, to declare a queue to publish to, and to return the channel to be used by the
+    //publisher
+    pub async fn add_pub_channel_and_queue(&self, queue_name: &str) -> Result<Channel, Box<dyn std::error::Error + Send>> {
+        let connection = match self.connection.clone() {
+            Some(x) => x,
+            None => {
+                //TODO: Add backtrace macro here
+                let msg = format!("mq::add_sub_channel_and_queue: Connection was None while adding channel for Queue: {}", queue_name);
+                return Err(future_err(msg));
+            },
+        };
+
+        let exchange: &str = DEFAULT_EXCHANGE;
+        
+        let mut channel = match connection.open_channel(None).await {
+            Ok(v) => v,
+            Err(e) => {
+                    //TODO: Add backtrace macro here
+                    let msg = format!("mq::add_sub_channel_and_queue - Error occurred while opening channel: {}", e);
+                    return Err(future_err(msg));
+            },
+        };
+        
+        match channel
+            .register_callback(DefaultChannelCallback)
+            .await {
+            Ok(_) => (),
+            Err(e) => {
+                let msg = format!("mq::add_sub_channel_and_queue - Error occurred while registering callback: {}", e);
+                return Err(future_err(msg));
+            },
+        };
+        //Declare queue
+        let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
+            Ok(v) => {
+                if v.is_some() {
+                    v
+                } else {
+                   None 
+                }
+            },
+            Err(e) => {
+                eprintln!("mq::add_sub_channel_and_queue - Error occurred while declaring queue: {}", e);
+                None
+            } 
+        };
+        if option_args.is_none() {
+            let msg = format!("mq::add_sub_channel_and_queue - Queue: {} was None after declaring", queue_name);
+            return Err(future_err(msg)); 
+        }
+        
+
+        //match channel
+        //    .queue_bind(QueueBindArguments::new(
+        //        &queue_name,
+        //        exchange,
+        //        &queue_name,
+        //    ))
+        //    .await {
+        //        Ok(()) => (),
+        //        Err(e) => {
+        //            let msg = format!("mq::add_sub_channel_and_queue - Error while binding queue: {} to exchange: {}", queue_name, exchange);
+        //            return Err(future_err(msg)); 
+        //        }
+        //    };
+        
+
+        Ok(channel)
+    }
+
+    ///add_channel method for adding a channel to an mq connection and returning the new channel
+    pub async fn add_channel(&self, channel_id: Option<AmqpChannelId>) -> Result<Channel, Box<dyn std::error::Error>> {
+        let connection = match self.connection.clone() {
+            Some(x) => x,
+            None => {
+                return Err("mq::add_channel: Connection was None".into())
+            },
+        };
+
+        let mut channel = match connection.open_channel(channel_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                    let msg = format!("mq::add_channel - Error occurred while opening channel: {}", e);
+                    return Err(msg.into());
+            },
+        };
+    
+        match channel
+            .register_callback(DefaultChannelCallback)
+            .await {
+            Ok(_) => (),
+            Err(e) => {
+                let msg = format!("mq::add_channel - Error occurred while registering callback: {}", e);
+                return Err(msg.into());
+            }
+        };
+        
+        Ok(channel)
     }
 
     //add queue method for adding a queue to the current channel
-    pub async fn add_queue(&mut self, channel: &mut Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn add_queue(&mut self, channel: &Channel, queue_name: &str, routing_key: &str, exchange_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         //Declare queue
         let option_args = match channel.queue_declare(QueueDeclareArguments::durable_client_named(queue_name)).await {            
             Ok(v) => {
@@ -125,16 +389,115 @@ impl<'a> MQConnection<'a> {
 
         Ok(())
     }
+
+    ///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+    //Refactor to take in a Queue trait and publish based off shared properties
+    pub async fn publish_to_next_queue(&self, queue_name: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+        //TODO: implement function to grab publishing channel
+
+        let exchange_name = DEFAULT_EXCHANGE;
+        let next_queue = match self.get_next_queue(queue_name) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("mq::MQConnection::publish_to_next_queue() - error getting next queue from sequence: {}", e);
+                return Err(Box::from(msg));
+            }
+        };
+        let args = BasicPublishArguments::new(exchange_name, next_queue);
+
+        //TODO: implement grabbing publishing channel if it doesn't exist for each queue
+        let channel = match self.add_pub_channel_and_queue(next_queue).await {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("mq::MQConnection::publish_to_next_queue() - error getting channel for publishing: {}", e);
+                return Err(Box::from(msg));
+            }
+
+        };
     
+        match channel
+            .basic_publish(BasicProperties::default(), content, args)
+            .await {
+                Ok(_) => {},
+                Err(e) => {
+                    let msg = format!("mq::publish_to_queue - Error occurred while publishing message: {}", e);
+                    return Err(msg.into());
+                },
+            }
+
+        match self.close_channel(channel).await {
+            Ok(_) => {},
+            Err(e) => {
+                let msg = format!("mq::publish_to_queue - Error occurred while closing publishing channel: {}", e);
+                return Err(msg.into());
+            }
+        };
+
+    
+        Ok(())
+    }
+
+    //close_channel closes the channel passed in as an argument (note the channel is moved)
+    pub async fn close_channel(&self, channel: Channel) -> Result<(), Box<dyn std::error::Error + Send>> {
+        let res = match channel.close().await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let msg = format!("mq::MQConnection::close_channel() - Error while closing channel: {}", e);
+                return Err(future_err(msg))
+            }
+        };
+    }
+
     //close_connections closes all connections to the MQ server
     pub async fn close_connections(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.connection.clone().expect("mq::close_connections - Connection was None while closing").close().await?;
 
         Ok(())
     }
+    // get_next_queue returns the next queue in a sequence given the current queue_name
+    fn get_next_queue(&self, current_queue: &str) -> Result<&str, Box<dyn std::error::Error>> {
+        let queue_sequence = match &self.queue_sequence {
+            Some(v) => v,
+            None => {
+                let err = Box::from("mq::get_next_queue - Queue sequence not found!");
+                return Err(err);
+            }
+        };
+        let seq_len: i64 = queue_sequence.len() as i64;
+        for (key, value) in queue_sequence.into_iter() {
+            if value.as_str() == current_queue && *key != seq_len - 1 {
+                let next_key = *key + 1;
+                let next_queue = match queue_sequence.get(&next_key) {
+                    Some(v) => v,
+                    None => {
+                        return Err(Box::from("mq::get_next_queue - Next queue was unwrapped as None"));
+                    },
+                };
+                //let msg = format!("{}'s next queue: {}", current_queue, next_queue);
+                //dbg!(msg);
+                return Ok(next_queue.as_str());
+            } else if value.as_str() == current_queue {
+                println!("mq::get_next_queue - last queue in sequence");
+                return Ok("")
+            }
+        }
+
+        let err = Box::from("mq::get_next_queue - current_queue not found in queue sequence");
+        Err(err)
+    }
+}
+
+
+//TODO: Convert into more generic struct: Bandaid to create errors which implements the SEND trait 
+pub fn future_err(msg: String) -> Box<futures::io::Error> {
+    //TODO: Add backtrace macro here
+    let custom_error = std::io::Error::other(msg);
+    let fut_err: futures::io::Error = futures::io::Error::from(custom_error);
+    Box::new(fut_err)
 }
 
 ///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+//Refactor to take in a Queue trait and publish based off shared properties
 pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
     //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
     let args = BasicPublishArguments::new(exchange_name, routing_key);
@@ -152,8 +515,157 @@ pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_ke
     Ok(())
 }
 
-//Trait to implement for each queue step (Must implement AsyncConsumer Trait as well
-//TODO: Refactor this trait to new structure
+//consume_from_queue graps deliveries from mq receiver channel 
+// and inserts them into the given process_func
+// handle acking/nacking here depending on result of process_func
+//pub async fn consume_from_queue<F, Fut>(consumer_args: BasicConsumeArguments, sub_tx: Sender<SubChannelCommand>, process_func: impl FnMut(&ConsumerMessage) -> Fut) -> Result<(), Box<dyn std::error::Error>> 
+//where 
+//    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+//{
+pub async fn consume_from_queue(consumer_args: BasicConsumeArguments, sub_tx: Sender<SubChannelCommand>, queue: &impl Queue) -> Result<(), Box<dyn std::error::Error>>  {
+
+    //open channel here
+    //Possibly convert to helper function //input (sub_tx, consumer_args) //output: Result<Channel,
+    //Error)
+    let (resp_tx, resp_rx) = oneshot::channel();
+    //Convert MQ_connection to communicate via mpsc instead?
+    let cmd = SubChannelCommand::Open { 
+        queue_name: consumer_args.queue.clone(), 
+        resp: resp_tx,
+    };
+    match sub_tx.send(cmd).await {
+        Ok(()) => (),
+        Err(e) => {
+            let msg = format!("mq::consume_from_queue: Error while sending subscription thead: {}", e);
+            return Err(msg.into());
+        },
+    };
+    let resp = match resp_rx.await {
+        Ok(x) => x,
+        Err(e) => {
+            let msg = format!("mq::consume_from_queue: Error while receiving from subscription channel: {}", e);
+            return Err(msg.into());
+        }
+
+    };
+
+    let channel = match resp {
+        Ok(channel) => channel,
+        Err(e) => {
+            let msg = format!("mq::consume_from_queue: Error received from subscription channel: {}", e);
+            return Err(msg.into());
+        }
+    };
+    /////
+
+
+
+    //declare while loop consuming from messages_rx
+    //consuming behavior defined here
+    let (ctag, mut messages_rx) = match channel.basic_consume_rx(consumer_args).await {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(e.into())
+        },
+    };
+
+    //Should I convert or wrap it in a select statement?
+    while let Some(deliver) = messages_rx.recv().await {
+        //TODO: Add await once we figure out how to pass an async function as arg
+        match queue.process_func(&deliver).await {
+            Ok(()) => {
+                //ack delivery 
+                match ack_delivery(deliver, &channel).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        let msg = format!("mq::consume_from_queue: Error while acking delivery {}",e);
+                        return Err(Box::from(msg));
+                    }
+                }
+            },
+            Err(e) => {
+                //nack delivery (TODO: requeue after logic is hammered out)
+                let msg = format!("mq::consume_from_queue: Error return from consuming queue - {}", e);
+                println!("{}", msg);
+                match nack_delivery(deliver, &channel).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        let msg = format!("mq::consume_from_queue: Error while nacking delivery {}",e);
+                        return Err(Box::from(msg));
+                    }
+                }
+            },
+        };
+    }
+
+    //Need a context like struct here
+    if let Err(e) = channel.basic_cancel(BasicCancelArguments::new(&ctag)).await {
+        let msg = format!("parsing_queue::process_queue - Error occurred while cancelling consumer: {}", e);
+        println!("{}", msg);
+        return Err(msg.into());
+    }
+    
+    let msg = format!("{} queue closed: may need to need to wrap consumption in another loop", queue.queue_name());
+
+    println!("{}", msg);
+
+    Ok(())
+}
+
+async fn ack_delivery(deliver: ConsumerMessage, channel: &Channel) -> Result<(), Box<dyn std::error::Error>> {
+
+    //Unwrap delivery
+    let delivery = match deliver.deliver {
+        Some(x) => x,
+        None => {
+            return Err(Box::from("mq::ack_delivery - deliver was None"))
+        },
+
+    };
+
+    let args = BasicAckArguments::new(delivery.delivery_tag(), false);
+
+    match channel.basic_ack(args).await {
+        Ok(_) => {},
+        Err(e) => {
+            let msg = format!("mq::ack_delivery - Error occurred while acking message: {}", e);
+            return Err(Box::from(msg));
+        },
+    };
+
+    Ok(())
+}
+
+
+async fn nack_delivery(deliver: ConsumerMessage, channel: &Channel) -> Result<(), Box<dyn std::error::Error>> {
+
+    //Unwrap delivery
+    let delivery = match deliver.deliver {
+        Some(x) => x,
+        None => {
+            return Err(Box::from("mq::nack_delivery - deliver was None"))
+        },
+
+    };
+
+    //Requeue = 3rd argument: TODO set to true here after fixing logic in order to requeue after
+    //errors
+    let args = BasicNackArguments::new(delivery.delivery_tag(), false, false);
+
+    //Perform nack
+    match channel.basic_nack(args).await {
+        Ok(_) => {},
+        Err(e) => {
+            let msg = format!("mq::nack_delivery - Error occurred while nacking message: {}", e);
+            return Err(Box::from(msg));
+        },
+    };
+
+    Ok(())
+}
+
+
+//Trait to implement for each queue step 
 #[async_trait]
 pub trait Queue {
     //Declare a new queue
@@ -175,6 +687,7 @@ pub trait Queue {
     //Start a consumer on channel?
     //and run in the background
     //async fn process_queue(&mut self);
+    async fn process_func(&self, deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>>;
 
 
     //Consume func (Do we need this?
@@ -190,12 +703,18 @@ pub trait Queue {
     //Insert into next queue
 }
 
-//Requires RabbitMQ to be running
+//Requires RabbitMQ container to be running
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use amqprs::consumer::DefaultConsumer;
 
     use super::*;
+    use crate::err_loc;
+    use futures::future::join_all;
+    use tokio::sync::mpsc;
+    #[macro_use(err_loc)]
 
     use reqwest::Client;
     use serde_json::Value;
@@ -361,6 +880,209 @@ mod tests {
         channel.close().await.unwrap();
         mq.close_connections().await.unwrap();
     }
+
+    //add_sub_channel_and_queue
+    //add_pub_channel_and_queue
+    //publish_to_next_queue
+    //close_channel
+    //consume_from_queue
+    //ack_delivery
+    #[tokio::test]
+    async fn test_consume_from_queue() {
+        // create and open an MQ connection
+        let mut mq_connection = Arc::new(tokio::sync::Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
+        match mq_connection.lock().await.open().await {
+            Ok(_) => (),
+            Err(e) => {
+                panic!("{}, error: main: Error while opening connection to rabbitmq: {}", err_loc!(), e);
+            }
+        };
+        enum TestCommand {
+            Send {
+                message_received: i64,
+            },
+        }
+        // declare a fake queue that implements Queue trait
+        struct FakeQueue {
+            name: String,
+            message_tx: Sender<TestCommand>,
+        }
+        impl FakeQueue {
+            fn new(name: String, message_tx: Sender<TestCommand>) -> FakeQueue {
+                FakeQueue {
+                    name,
+                    message_tx,
+                }
+            }
+        }
+        #[async_trait]
+        impl Queue for FakeQueue {
+            fn queue_name(&self) -> &str {
+                &self.name
+            }
+            fn args(&self) -> BasicConsumeArguments {
+                BasicConsumeArguments::new(
+                    "parsing_queue",
+                    "test_consumer_tag",
+                )
+            }
+            async fn process_func(&self, _deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>>  {
+                //TODO: publish messages back to main testing thread
+                let cmd = TestCommand::Send { message_received: 1 };
+                match self.message_tx.send(cmd).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        panic!("{} - {}", e, err_loc!());
+                    }
+                };
+                Ok(())
+            }
+        }
+        
+
+        // create a publishing mpsc channel
+        let (pub_tx, mut pub_rx) = mpsc::channel::<PubChannelCommand>(128);
+        // create a subscription mpsc channel
+        let (sub_tx, mut sub_rx) = mpsc::channel::<SubChannelCommand>(128);
+
+        let (sending_tx, mut sending_rx) = mpsc::channel::<TestCommand> (128);
+        // create publishing thread
+        let mq_connection_p = mq_connection.clone();
+        let t1 = tokio::spawn(async move {
+            while let Some(cmd) = pub_rx.recv().await {
+                match cmd {
+                    PubChannelCommand::Publish { queue_name, content, resp } => {
+                        //pass in current queue name and content to publish_to_next_queue func
+                        //open a channel
+                        //send content and return result of send
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_p.lock().await.publish_to_next_queue(&queue_name, content).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                let msg = format!("Error while publishing from queue: {}", queue_name);
+                                panic!("{} - {}", msg, err_loc!())
+                            }
+                        };
+                        continue;
+                    
+                    }
+                }
+            }
+        });
+        // create subscription thread
+        let mq_connection_s = mq_connection.clone();
+        let t2 = tokio::spawn(async move {
+            while let Some(cmd) = sub_rx.recv().await {
+                match cmd {
+                    SubChannelCommand::Open { queue_name, resp } => {
+                        //open a channel
+                        //declare a queue on the channel
+                        let channel: Result<Channel, Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.add_sub_channel_and_queue(&queue_name).await {
+                            Ok(v) => Ok(v),
+                            Err(e) => {
+                                panic!("Error while opening channel and adding queue: {} - {}", e, err_loc!());
+                            }
+
+                        };
+                        //send channel back to sender
+                        let res = match resp.send(channel) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                panic!("subscription_thread: Error while sending channel to queue: {} for subscribing - {}", &queue_name, err_loc!())
+
+                            },
+                        };
+                        continue;
+                    }
+                    SubChannelCommand::Close { queue_name, channel, resp } => {
+                        //close the channel passed in
+                        let response: Result<(), Box<dyn std::error::Error + Send>> = match mq_connection_s.lock().await.close_channel(channel).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                panic!("Error while opening channel and adding queue: {} - {} - {}", queue_name, e, err_loc!());
+                            }
+                        };
+                        continue;
+
+                    }
+                }
+           }
+        });
+        
+        // create a list of messages
+        // publish messages
+        for i in 0..10 {
+            let (resp_tx, _) = oneshot::channel();
+            let content = String::from(
+                format!(r#"
+                    {{
+                        "publisher": "main",
+                        "symbol": {:?} 
+                    }}
+                "#,
+                &i)
+            ).into_bytes();
+            let cmd = PubChannelCommand::Publish {
+                queue_name: String::from(""),
+                content,
+                resp: resp_tx,
+            };
+            match pub_tx.send(cmd).await {
+                Ok(_) => (),
+                Err(e) => {
+                    panic!("Error while publishing message: {} - {}", e, err_loc!()); 
+                }
+
+            };
+            
+        }
+
+        // consume messages
+        let t3 = tokio::spawn(async move {
+            let mut fq = FakeQueue::new("parsing_queue".to_string(), sending_tx);
+
+            match consume_from_queue(fq.args(), sub_tx, &fq).await {
+                Ok(()) => (),
+                Err(e) => {
+                    panic!("{} - {}", e, err_loc!());
+                }
+            };
+
+            //Ok::<(), std::io::Error>(())
+
+        });
+        // ack messages
+        let mut total_messages: i64 = 0;
+        while let Some(cmd) = sending_rx.recv().await {
+            match cmd {
+                TestCommand::Send { message_received } => {
+
+                    total_messages += message_received;
+                    if total_messages >= 10 {
+                        break;
+                    }
+                    
+                }
+            }
+        }
+
+        assert_eq!(10, total_messages);
+        println!("{}", &total_messages);
+
+        
+        
+        // close channels
+        match mq_connection.lock().await.close_connections().await {
+            Ok(_) => {
+                Ok::<(), std::io::Error>(())
+            },
+            Err(e) => {
+                panic!("{} - {}", e, err_loc!());
+            }
+        };
+        
+    }
+
+    //TODO: test nack_delivery after adding retry logic
 
 }
 

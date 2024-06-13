@@ -2,7 +2,9 @@ extern crate sqlx;
 extern crate std;
 
 
-use sqlx::postgres::PgPool;
+use futures_util::future::BoxFuture;
+use sqlx::error::DatabaseError;
+use sqlx::postgres::{PgDatabaseError, PgPool};
 use sqlx::{Pool, Postgres};
 use std::sync::Arc;
 use std::error::Error;
@@ -114,10 +116,16 @@ impl<'a> DBConnection<'a> {
             Ok(v) => v,
             Err(e) => return Err(e),
         };
-        //have to implement trait to do this in a straightforward manner
 
-        //match result
-        return Ok(Contract::from(result));
+        let contract = Contract::from(result);
+
+        //if contract name is empty we know a parsing error occurred 
+        if contract.contract_name == "" {
+            let msg = format!("db::select_contract - invalid contract returned while parsing pg row: check logs for more information");
+            return Err(sqlx::Error::ColumnDecode { index: "0".to_string(), source: Box::from(msg) })
+        }
+
+        return Ok(contract);
     }
     pub async fn delete_contract(&mut self, contract_name: &str) -> Result<(), sqlx::Error> {
         let pool = match &self.connection_pool {

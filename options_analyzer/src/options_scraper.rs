@@ -6,6 +6,7 @@ extern crate curl;
 extern crate serde;
 extern crate reqwest;
 use reqwest::header::{HeaderMap, InvalidHeaderName};
+use crate::config_parse::get_reqwest_headers;
 use scraper::{Html, Selector};
 use tokio::sync::watch::error;
 use std::{env::args, fmt::Error, fs, str, collections::HashMap};
@@ -172,7 +173,7 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
                 return Err(msg.into());
             },
         }
-        //transfer.perform().unwrap();
+        //transfer.perform());
         match transfer.perform() {
             Ok(_) => (),
             Err(e) => {
@@ -193,7 +194,6 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
         },
     };
     
-    //let serialized = serde_json::to_string(&ts).unwrap();
 
     let serialized = match serde_json::to_string(&ts) {
         Ok(x) => x,
@@ -210,7 +210,13 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
 }
 
 pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::Error>> {
-    let headers_from_file = get_reqwest_headers()?;
+    let headers_from_file = match get_reqwest_headers() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("options_scraper::async_scrape: error while grabbing reqwest headers: {}", e);
+            return Err(Box::from(msg));
+        },
+    };
     let mut headers = HeaderMap::new();
     for header in headers_from_file.keys() {
         let header_value = match headers_from_file.get(header) {
@@ -373,30 +379,6 @@ fn process_bytes(stringed: String) -> Result<TimeSeries, Box<dyn std::error::Err
     Ok(TimeSeries{
         data: contracts,
     })
-}
-
-#[derive(Deserialize)]
-struct Config {
-    reqwest_headers: HashMap<String, String>,
-}
-
-fn get_reqwest_headers() -> Result<HashMap<String, String>, Box<dyn std::error::Error>>{
-    let contents = match fs::read_to_string("config.toml") {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = format!("options_scraper::get_reqwest_headers() - Failed to read config.toml file - {}", e);
-            return Err(msg.into());
-        }
-    };
-    let config: Config = match toml::from_str(&contents) {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = format!("options_scraper::get_reqwest_headers() - Failed to parse TOML from config.toml - {}", e);
-            return Err(msg.into());
-        }
-    };
-    Ok(config.reqwest_headers)
-
 }
 
 #[cfg(test)]
