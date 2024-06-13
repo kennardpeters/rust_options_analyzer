@@ -887,7 +887,6 @@ mod tests {
     //close_channel
     //consume_from_queue
     //ack_delivery
-    //nack_delivery
     #[tokio::test]
     async fn test_consume_from_queue() {
         // create and open an MQ connection
@@ -1082,6 +1081,8 @@ mod tests {
         };
         
     }
+
+    //TODO: test nack_delivery after adding retry logic
 
 }
 
