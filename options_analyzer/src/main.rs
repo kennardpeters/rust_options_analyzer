@@ -73,26 +73,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut contract_cache = Arc::new(tokio::sync::Mutex::new(scraped_cache::ScrapedCache::new(1000)));
     println!("Scraped Cache Created");
 
-    //Parsing Queue Declaration
-    //let parsing_routing_key = "parsing_queue";
-    //let exchange_name = "amq.direct";
-    //let queue_name = "parsing_queue"; //next queue
-    //let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new(queue_name, parsing_routing_key, exchange_name, sub_tx.clone(), pub_tx.clone(), cache_tx.clone())));
-    //println!("Parsing Queue Created");
-
-    //Writing Queue Declaration
-    //let writing_routing_key = "writing_queue";
-    //let w_exchange_name = "amq.direct";
-    //let queue_name = "writing_queue";
-    //let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new(queue_name, writing_routing_key, w_exchange_name, db_connection.clone(), cache_tx.clone())));
-    //println!("Writing Queue Created");
-
-    //Calculation Queue Declaration
-    //let calc_routing_key = "calc_queue";
-    //let calc_exchange_name = "amq.direct";
-    //let queue_name = "calc_queue";
-    //let mut calc_queue = Arc::new(tokio::sync::Mutex::new(calc_queue::CalcQueue::new(queue_name, calc_routing_key, calc_exchange_name, db_connection.clone(), cache_tx.clone())));
-    //println!("Calc Queue Created");
 
     match mq_connection.lock().await.open().await {
         Ok(_) => {}
@@ -111,16 +91,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("DB connection opened");
-    //Block below needed? 
-    //let pub_channel_id = Some(3);
-    //let mut pub_channel = match mq_connection_p.lock().await.add_channel(pub_channel_id).await {
-    //    Ok(c) => Some(c),
-    //    Err(e) => {
-    //        eprintln!("main: Error occurred while adding channel 3: {}", e);
-    //        process::exit(1);
-    //    }
-    //};
-    //println!("Pub Channel Created");
     
     //TODO: Convert this to another form of input (Cmd line arg, csv, or initiated by front-end?) 
     let content = String::from(
@@ -260,42 +230,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parsing_sub_tx = sub_tx.clone();
     let parsing_cache_tx = cache_tx.clone();
     let t2 = tokio::spawn(async move {
-        //let mut mq_connection_c = mq_connection_c.lock().await;
+
         let mut parsing_queue = Arc::new(tokio::sync::Mutex::new(ParsingQueue::new("parsing_queue", "", "", parsing_sub_tx.clone(), parsing_pub_tx.clone(), parsing_cache_tx.clone())));
 
-        ////declare new channel for background thread
-        //let p_channel_id = Some(2);
-        //let mut sub_channel = match mq_connection_c.add_channel(p_channel_id).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding channel w/ id {} in parsing thread: {}", p_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("Sub Channel Created on Parsing Thread");
-
-        ////declare new channel for publishing from background thread
-        //let pfs_channel_id = Some(5);
-        //let mut pub_from_sub_channel = match mq_connection_c.add_channel(pfs_channel_id).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding channel w/ id {} in parsing thread: {}", p_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("Pub from Sub Channel Created on Parsing Thread");
-
-        //let queue_name = "parsing_queue";
-
-        //Add queue to background thread 
-        //let _ = match mq_connection_c.add_queue(sub_channel.as_mut().unwrap(), queue_name, parsing_routing_key, "amq.direct").await {
-        //    Ok(_) => {},
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("Queue Created on Parsing Thread");
         match parsing_queue.lock().await.process_queue().await {
             Ok(_) => {},
             Err(e) => {
@@ -312,40 +249,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let writing_cache_tx = cache_tx.clone();
     let writing_db_connection = db_connection.clone();
     let t3 = tokio::spawn(async move {
-        //let w_exchange_name = "amq.direct";
-        //let writing_routing_key = writing_routing_key; 
-        //let queue_name = "writing_queue";
-
-        //let mut mq_connection_w = mq_connection_w.lock().await;
-
-        ////declare new channel for background thread
-        //let w_channel_id = Some(6);
-        //let mut sub_channel = match mq_connection_w.add_channel(w_channel_id).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding sub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("sub Channel Created on Writing Thread");
-
-        ////declare a new channel for publishing from background thread
-        //let pfw_channel_id = Some(7);
-        //let mut pub_channel = match mq_connection_w.add_channel(pfw_channel_id).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding pub channel w/ id {} in writing thread: {}", w_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-
-        //let _ = match mq_connection_w.add_queue(sub_channel.as_mut().unwrap(), queue_name, writing_routing_key, w_exchange_name).await {
-        //    Ok(_) => {},
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
-        //        process::exit(1);
-        //    }
-        //};
 
         let mut writing_queue = Arc::new(tokio::sync::Mutex::new(writing_queue::WritingQueue::new("writing_queue", "", "", writing_db_connection, writing_sub_tx, writing_pub_tx, writing_cache_tx.clone())));
         
@@ -369,43 +272,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let calc_cache_tx = cache_tx.clone();
     let calc_db_connection = db_connection.clone();
     let t4 = tokio::spawn(async move {
-        //let exchange_name = "amq.direct";
-        //let queue_name = "calc_queue";
-        //let calc_routing_key = queue_name; 
-
-        //let mut mq_connection_ca = mq_connection_ca.lock().await;
-
-        ////declare new channel for background thread
-        //let c_channel_id = Some(12);
-        ////let mut sub_channel = match mq_connection_ca.add_channel(c_channel_id).await {
-        //let mut sub_channel = match mq_connection_ca.add_channel(None).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding sub channel w/ id {} in calc thread: {}", c_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("sub Channel Created on Calculations Thread");
-
-        ////declare a new channel for publishing from background thread
-        //let cfw_channel_id = Some(11);
-        ////let mut pub_channel = match mq_connection_ca.add_channel(cfw_channel_id).await {
-        //let mut pub_channel = match mq_connection_ca.add_channel(None).await {
-        //    Ok(c) => Some(c),
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding pub channel w/ id {} in calc thread: {}", cfw_channel_id.unwrap(), e);
-        //        process::exit(1);
-        //    }
-        //};
-
-        //match mq_connection_ca.add_queue(sub_channel.as_mut().unwrap(), queue_name, calc_routing_key, exchange_name).await {
-        //    Ok(_) => {},
-        //    Err(e) => {
-        //        eprintln!("main: Error occurred while adding queue w/ name {}: {}", queue_name, e);
-        //        process::exit(1);
-        //    }
-        //};
-        //println!("Queue Created on Calculations Thread");
 
         let mut calc_queue = Arc::new(tokio::sync::Mutex::new(calc_queue::CalcQueue::new("calc_queue", "", "", calc_db_connection, calc_sub_tx, calc_pub_tx, calc_cache_tx)));
 
@@ -450,7 +316,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     
-    //mq::publish_to_queue(pub_channel.as_mut().unwrap(), exchange_name, parsing_routing_key, content).await?;
     println!("Item Published! from main");
    
    //let future = async {
