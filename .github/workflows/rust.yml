@@ -27,6 +27,6 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       working-directory: ./options_analyzer
-      run: cargo test --verbose
+      run: cargo test --verbose --show-output
     - name: shutdown containers
       run: docker compose down
