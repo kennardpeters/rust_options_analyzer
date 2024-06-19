@@ -24,6 +24,7 @@ pub mod options_scraper;
 pub mod writing_queue;
 pub mod parsing_queue;
 pub mod calc_queue;
+pub mod stream_queue;
 pub mod config_parse;
 pub use mq::Queue;
 
