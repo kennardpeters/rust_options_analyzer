@@ -29,3 +29,15 @@ http-body-util = "0.1.1"
 dotenv = "0.15.0"
 toml = "0.8.12"
 log = "0.4.21"
+
+#grpc deps
+tonic = "0.11"
+prost = "0.12"
+tonic-reflection = "0.11"
+tonic-web = "0.11"
+tower-http = { version = "0.4", features = ["cors"] }
+tokio-stream = "0.1.15"
+
+
+[build-dependencies]
+tonic-build = "0.11"

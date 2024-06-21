@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package contracts;
+
+message ContractRequest {
+	string contract_name = 1;
+	//from Date?
+	//to Date?
+}
+
+message ContractResponse {
+	string time = 1; //will do string and unserialize
+	string contract_name = 2;
+	string last_trade_date = 3; //string to date
+	int64 strike = 4;
+	int64 last_price = 5;
+	float bid = 6;
+	float ask = 7;
+	float change = 8;
+	float percent_change = 9;
+	int64 volume = 10;
+	int64 open_interest = 11;
+	float implied_volatility = 12;
+}
+
+
+
+service Contract {
+	// ServerStreamingContract is server side streaming
+	rpc ServerStreamContract(ContractRequest) returns (stream ContractResponse) {}
+}
+

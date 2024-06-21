@@ -40,9 +40,11 @@ impl<'a> StreamQueue<'a> {
     }
 
     pub async fn process_queue(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let err_signature: &str = "{}::process_queue";
+        let err_signature = format!("{}::process_queue", STRUCT_NAME);
         //create queue arguments
         let args = self.new_args();
+        
+        //set up grpc server here and attach it to struct
 
         match consume_from_queue(args, self.sub_tx.clone(), self).await {
             Ok(()) => (),

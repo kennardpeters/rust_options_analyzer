@@ -8,12 +8,15 @@ use parsing_queue::ParsingQueue;
 use tokio::signal;
 use tokio::sync::{mpsc, Notify};
 use crate::scraped_cache::ScrapedCache;
+use crate::contract_service::ContractService;
 use serde_json::Value;
 use amqprs::channel::{BasicAckArguments, BasicCancelArguments};
 use sqlx::postgres::PgPool;
 use dotenv::dotenv;
 use futures::{executor::block_on, future::join_all};
 use tracing::{debug, error, info, warn};
+use contract_service::proto;
+use tonic::transport::Server;
 
 
 pub mod scraped_cache;
@@ -21,6 +24,7 @@ pub mod db;
 pub mod mq;
 pub mod types;
 pub mod options_scraper;
+pub mod contract_service;
 pub mod writing_queue;
 pub mod parsing_queue;
 pub mod calc_queue;
@@ -104,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         symbol)
     ).into_bytes();
     println!("content created");
+
 
 
     //Caching thread
@@ -294,6 +299,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     //Add Streaming step 
+    
+
+    //Run grpc service in separate thread
+    //let grpc_cache_tx = cache_tx.clone();
+    let t7 = tokio::spawn(async move {
+        let addr = match "[::1]:50051".parse() {
+            Ok(v) => v,
+            Err(e) => {
+                eprint!("main: Error occurred while parsing address for grpc: {}", e);
+                process::exit(1);
+            }
+        };
+
+        //let server = ContractService::new(grpc_cache_tx);
+        let server = ContractService::default();
+
+        let service = match tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
+            .build() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprint!("main: Error occurred setting up reflection service for grpc: {}", e);
+                    process::exit(1);
+                }
+            };
+
+        match Server::builder()
+            .accept_http1(true)
+            .layer(tower_http::cors::CorsLayer::permissive())
+            .add_service(service) //add web support later
+            .add_service(tonic_web::enable(proto::contract_server::ContractServer::new(server)))
+            .serve(addr)
+            .await {
+                Ok(()) => (),
+                Err(e) => {
+                    eprint!("main: Error while running grpc server: {}", e);
+                    process::exit(1);
+
+                },
+            };
+
+
+        //Ok::<(), Box<dyn std::error::Error + Send>>(())
+    });
 
     //Publish message to parsing queue
     let (resp_tx, resp_rx) = oneshot::channel();
@@ -347,6 +396,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
    handles.push(t4);
    handles.push(t5);
    handles.push(t6);
+   handles.push(t7);
    block_on(join_all(handles));
 
    let elapsed_time = now.elapsed();
