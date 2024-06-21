@@ -1,7 +1,7 @@
 use proto::{ContractRequest, ContractResponse, contract_server::{Contract, ContractServer}};
 use tonic::transport::Server;
 use std::{pin::Pin, time::Duration};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use crate::scraped_cache::Command;
 
@@ -13,28 +13,21 @@ pub mod proto {
 }
 
 
-//#[derive(Debug)] //removed Default
-//pub struct ContractService {
-//    cache_tx: mpsc::Sender<Command>,
-//    //rx to receive values from stream queue
-//    //probably an atomic hashmap of remote addr => contracts to multiplex # of contracts to send to each
-//    //client
-//}
+#[derive(Debug)] //removed Default
+pub struct ContractService {
+    cache_tx: mpsc::Sender<Command>,
+    //rx to receive values from stream queue
+    //probably an atomic hashmap of remote addr => contracts to multiplex # of contracts to send to each
+    //client
+}
 
-//impl ContractService {
-//    fn default() -> Self {
-//        ContractService {
-//        }
-//    }
-//    pub fn new(cache_tx: mpsc::Sender<Command>) -> ContractService {
-//        ContractService {
-//            cache_tx,
-//        }
-//    }
-//}
-
-#[derive(Debug, Default)] //removed Default
-pub struct ContractService {}
+impl ContractService {
+    pub fn new(cache_tx: mpsc::Sender<Command>) -> Self {
+        ContractService {
+            cache_tx,
+        }
+    }
+}
 
 #[tonic::async_trait]
 impl Contract for ContractService {
@@ -53,37 +46,62 @@ impl Contract for ContractService {
         let input = request.get_ref();
         
         let return_contract_name: String = input.contract_name.clone();
-        
-        let mut count = 0;
+
+        //TODO: Fix error handling below
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let command = Command::Get{
+            key: return_contract_name.clone(),
+            resp: resp_tx,
+        };
+        match self.cache_tx.send(command).await {
+            Ok(_) => {},
+            Err(e) => {
+                //let msg = format!("contract_service::server_stream_contract - Error occurred while requesting contract from cache: {}", e);
+                panic!("contract_service::server_stream_contract - Error occurred while requesting contract from cache: {}", e);
+                //return Err(future_err(msg));
+            },
+        };
+        let resp = match resp_rx.await {
+            Ok(x) => x,
+            Err(e) => {
+                //let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {}", e);
+                panic!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {}", e);
+                //return Err(future_err(msg));
+            },
+        };
+        let contract = match resp {
+            Ok(x) => {
+                if x.is_some() {
+                    x.unwrap()
+                } else {
+                    //let msg = format!("contract_service::server_stream_contract - Unwrapped None! from Cache for key: {}", return_contract_name.clone());
+                    panic!("contract_service::server_stream_contract - Unwrapped None! from Cache for key: {}", return_contract_name.clone());
+                    //println!("{}", msg);
+                    //return ok here in order to skip invalid
+                    //return Ok(())
+                }
+            },
+            Err(e) => {
+                //let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {:?}", e);
+                panic!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {:?}", e);
+                //return Err(future_err(msg))
+            },
+        };
 
         let repeat_w = std::iter::repeat_with(move || {
-            count += 1;
-
-            let fake_time = format!("{}", count.clone());
-            let fake_trade_date = format!("{}", count.clone());
-            let fake_strike: i64 = count.clone();
-            let fake_last_price: i64 = count.clone();
-            let fake_bid: i64 = count.clone();
-            let fake_open_int: i64 = count.clone();
-            let fake_volume: i64 = count.clone();
-            let fake_bid: f32 = count.clone() as f32;
-            let fake_ask: f32 = count.clone() as f32;
-            let fake_change: f32 = count.clone() as f32;
-            let fake_percent_change: f32 = count.clone() as f32;
-            let fake_iv: f32 = count.clone() as f32;
-            ContractResponse {
-                time: fake_time.clone(),
-                contract_name: return_contract_name.clone(),
-                last_trade_date: fake_trade_date.clone(),
-                strike: fake_strike.clone(),
-                last_price: fake_last_price.clone(),
-                bid: fake_bid.clone(),
-                ask: fake_ask.clone(),
-                change: fake_change.clone(),
-                percent_change: fake_percent_change.clone(), 
-                volume: fake_volume.clone(),
-                open_interest: fake_open_int.clone(),    
-                implied_volatility: fake_iv.clone(),
+            ContractResponse { 
+                time: contract.timestamp.clone().to_string(), 
+                contract_name: contract.contract_name.clone(), 
+                last_trade_date: contract.last_trade_date.clone(), 
+                strike: contract.strike.clone() as i64, 
+                last_price: contract.last_price.clone() as i64, 
+                bid: contract.bid.clone() as f32, 
+                ask: contract.ask.clone() as f32, 
+                change: contract.change.clone() as f32, 
+                percent_change: contract.percent_change.clone() as f32, 
+                volume: contract.volume.clone(), 
+                open_interest: contract.open_interest.clone(), 
+                implied_volatility: contract.implied_volatility.clone() as f32,
             }
         });
         let mut stream = Box::pin(tokio_stream::iter(repeat_w).throttle(Duration::from_millis(200)));

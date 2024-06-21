@@ -97,7 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("DB connection opened");
     
-    //TODO: Convert this to another form of input (Cmd line arg, csv, or initiated by front-end?) 
     let content = String::from(
         format!(r#"
             {{
@@ -302,7 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
 
     //Run grpc service in separate thread
-    //let grpc_cache_tx = cache_tx.clone();
+    let grpc_cache_tx = cache_tx.clone();
     let t7 = tokio::spawn(async move {
         let addr = match "[::1]:50051".parse() {
             Ok(v) => v,
@@ -313,7 +312,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         //let server = ContractService::new(grpc_cache_tx);
-        let server = ContractService::default();
+        let server = ContractService::new(grpc_cache_tx);
 
         let service = match tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
