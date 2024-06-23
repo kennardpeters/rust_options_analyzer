@@ -51,7 +51,7 @@ impl<'a> StreamQueue<'a> {
             Err(e) => {
                 let msg = format!("{} - error returned from consume_from_queue: {}", err_signature, e);
                 return Err(Box::from(msg));
-            }
+            },
         };
 
         Ok(())
@@ -74,6 +74,7 @@ impl<'a> Queue for StreamQueue<'a> {
     }
 
     async fn process_func(&self, deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>> {
+
         Ok(())
     }
 

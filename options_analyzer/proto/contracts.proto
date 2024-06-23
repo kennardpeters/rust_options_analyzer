@@ -12,8 +12,8 @@ message ContractResponse {
 	string time = 1; //will do string and unserialize
 	string contract_name = 2;
 	string last_trade_date = 3; //string to date
-	int64 strike = 4;
-	int64 last_price = 5;
+	int64 strike = 4; //possibly change to float
+	int64 last_price = 5; //possibly change to float
 	float bid = 6;
 	float ask = 7;
 	float change = 8;

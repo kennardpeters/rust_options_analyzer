@@ -1,5 +1,4 @@
-use proto::{ContractRequest, ContractResponse, contract_server::{Contract, ContractServer}};
-use tonic::transport::Server;
+use proto::{ContractRequest, ContractResponse, contract_server::{Contract, ContractServer}}; use tonic::transport::Server;
 use std::{pin::Pin, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
@@ -56,17 +55,15 @@ impl Contract for ContractService {
         match self.cache_tx.send(command).await {
             Ok(_) => {},
             Err(e) => {
-                //let msg = format!("contract_service::server_stream_contract - Error occurred while requesting contract from cache: {}", e);
-                panic!("contract_service::server_stream_contract - Error occurred while requesting contract from cache: {}", e);
-                //return Err(future_err(msg));
+                let msg = format!("contract_service::server_stream_contract - Error occurred while requesting contract from cache: {}", e);
+                return Err(tonic::Status::internal(msg));
             },
         };
         let resp = match resp_rx.await {
             Ok(x) => x,
             Err(e) => {
-                //let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {}", e);
-                panic!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {}", e);
-                //return Err(future_err(msg));
+                let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {}", e);
+                return Err(tonic::Status::internal(msg));
             },
         };
         let contract = match resp {
@@ -74,17 +71,13 @@ impl Contract for ContractService {
                 if x.is_some() {
                     x.unwrap()
                 } else {
-                    //let msg = format!("contract_service::server_stream_contract - Unwrapped None! from Cache for key: {}", return_contract_name.clone());
-                    panic!("contract_service::server_stream_contract - Unwrapped None! from Cache for key: {}", return_contract_name.clone());
-                    //println!("{}", msg);
-                    //return ok here in order to skip invalid
-                    //return Ok(())
+                    let msg = format!("contract_service::server_stream_contract - Unwrapped None! from Cache for key: {}", return_contract_name.clone());
+                    return Err(tonic::Status::internal(msg));
                 }
             },
             Err(e) => {
-                //let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {:?}", e);
-                panic!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {:?}", e);
-                //return Err(future_err(msg))
+                let msg = format!("contract_service::server_stream_contract - Error occurred while receiving contract from cache: {:?}", e);
+                return Err(tonic::Status::internal(msg));
             },
         };
 
