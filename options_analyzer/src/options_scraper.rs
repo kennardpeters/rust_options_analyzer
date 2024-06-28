@@ -140,8 +140,7 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
         Ok(_) => (),
         Err(e) => {
             let msg = format!("options_scraper::scrape: error while running easy.url: {}", e);
-            println!("{}", msg);
-            return Err(msg.into());
+            return Err(Box::from(msg));
         },
     };
     //Scope declared here in order to transfer ownership of stringed back to main function
@@ -169,17 +168,15 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
             Ok(_) => (),
             Err(e) => {
                 let msg = format!("options_scraper::scrape: error while running transfer.write_function: {}", e);
-                println!("{}", msg);
-                return Err(msg.into());
+                return Err(Box::from(msg));
             },
         }
         //transfer.perform());
         match transfer.perform() {
             Ok(_) => (),
             Err(e) => {
-                println!("{}", e);
                 let msg = format!("options_scraper::scrape: error while running transfer.perform: {}", e);
-                return Err(msg.into());
+                return Err(Box::from(msg));
             },
         }
 
@@ -189,19 +186,18 @@ pub fn scrape(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     let ts = match process_bytes(stringed) {
         Ok(x) => x,
         Err(e) => {
-            println!("{}", e);
-            return Err(e);
+            let msg = format!("options_scraper::scrape: error while processing bytes {}", e);
+            return Err(Box::from(msg));
         },
     };
     
 
     let serialized = match serde_json::to_string(&ts) {
         Ok(x) => x,
-        Err(_) => {
+        Err(e) => {
             //Handle error
-            let msg = format!("options_scraper::scrape: error on json serialization");
-            println!("{}", "error on serialization");
-            return Err("".to_string().into());
+            let msg = format!("options_scraper::scrape: error on json serialization {}", e);
+            return Err(Box::from(msg));
         },
     };
 

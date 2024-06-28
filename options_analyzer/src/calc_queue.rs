@@ -80,7 +80,7 @@ impl<'a> Queue for CalcQueue<'a> {
         let content = match &deliver.content {
             Some(x) => x,
             None => {
-                let msg = format!("calc_queue::process_func - content was None!");
+                let msg = "calc_queue::process_func - content was None!".to_string();
                 return Err(future_err(msg));
             },
         };

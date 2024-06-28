@@ -110,7 +110,7 @@ impl<'a> Queue for ParsingQueue<'a> {
         let content = match &deliver.content {
             Some(x) => x,
             None => {
-                let msg = format!("parsing_queue::process_func - content was None!");
+                let msg = "parsing_queue::process_func - content was None!".to_string();
                 return Err(future_err(msg));
             },
         };
@@ -150,7 +150,7 @@ impl<'a> Queue for ParsingQueue<'a> {
                 return Err(future_err(msg));
             },
         }; 
-        if output_ts.data.len() == 0 {
+        if output_ts.data.is_empty() {
             let msg = String::from("parsing_queue::process_func - 0 objects scraped successfully");
             return Err(future_err(msg));
         }
@@ -185,8 +185,7 @@ impl<'a> Queue for ParsingQueue<'a> {
 
             if self.publish_next_queue {
 
-                let e_content = String::from(
-                    format!(
+                let e_content = format!(
                         r#"
                             {{
                                 "publisher": "parsing",
@@ -194,7 +193,6 @@ impl<'a> Queue for ParsingQueue<'a> {
                             }}
                         "#,
                         next_key 
-                    )
                 ).into_bytes();
 
                 let (pub_resp_tx, pub_resp_rx) = oneshot::channel(); 

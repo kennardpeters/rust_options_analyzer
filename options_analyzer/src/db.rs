@@ -60,8 +60,7 @@ impl<'a> DBConnection<'a> {
         let pool = match &self.connection_pool {
             Some(v) => v,
             None => {
-                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
-                //sqlx::Error::from(j)
+                let msg = "db::DBConnection::insert_contract() - None unwrapped from connection pool".to_string();
                 println!("{}", msg);
                 return Err(sqlx::Error::PoolClosed);
             },
@@ -101,7 +100,7 @@ impl<'a> DBConnection<'a> {
         let pool = match &self.connection_pool {
             Some(v) => v,
             None => {
-                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
+                let msg = "db::DBConnection::insert_contract() - None unwrapped from connection pool".to_string();
                 //sqlx::Error::from(j)
                 println!("{}", msg);
                 return Err(sqlx::Error::PoolClosed);
@@ -120,19 +119,18 @@ impl<'a> DBConnection<'a> {
         let contract = Contract::from(result);
 
         //if contract name is empty we know a parsing error occurred 
-        if contract.contract_name == "" {
-            let msg = format!("db::select_contract - invalid contract returned while parsing pg row: check logs for more information");
+        if contract.contract_name.is_empty() {
+            let msg = "db::select_contract - invalid contract returned while parsing pg row: check logs for more information".to_string();
             return Err(sqlx::Error::ColumnDecode { index: "0".to_string(), source: Box::from(msg) })
         }
 
-        return Ok(contract);
+        Ok(contract)
     }
     pub async fn delete_contract(&mut self, contract_name: &str) -> Result<(), sqlx::Error> {
         let pool = match &self.connection_pool {
             Some(v) => v,
             None => {
-                let msg = format!("db::DBConnection::insert_contract() - None unwrapped from connection pool");
-                //sqlx::Error::from(j)
+                let msg = "db::DBConnection::insert_contract() - None unwrapped from connection pool".to_string();
                 println!("{}", msg);
                 return Err(sqlx::Error::PoolClosed);
             },

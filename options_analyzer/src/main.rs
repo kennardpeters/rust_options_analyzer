@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let symbol = match env::var("SYMBOL") {
         Ok(v) => {
-            if v != "" {
+            if !v.is_empty() {
                 v
             } else {
                 panic!("{}, error: {}", err_loc!(), "SYMBOL was empty in environment");
@@ -97,15 +97,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("DB connection opened");
     
-    let content = String::from(
-        format!(r#"
+    let content = format!(r#"
             {{
                 "publisher": "main",
                 "symbol": {:?} 
             }}
         "#,
-        symbol)
-    ).into_bytes();
+        symbol).into_bytes();
     println!("content created");
 
 
@@ -120,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let res = contract_cache.lock().await.get(&key).await.cloned();
 
                     //Send response of action back to sender via tx passed in
-                    let respx = match resp.send(Ok(res.clone())) {
+                    match resp.send(Ok(res.clone())) {
                         Ok(()) => (),
                         Err(e) => {
                             let msg = format!("caching_thread: Error while sending response: {:?} to get request", res);
@@ -136,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let res = contract_cache.lock().await.set(key, value).await;
 
                     //Send response of action back to sender via tx passed in
-                    let respx = match resp.send(Ok(())) {
+                    match resp.send(Ok(())) {
                         Ok(()) => (),
                         Err(e) => {
                             let msg = format!("caching_thread: Error while sending response: {:?} to set request", res);
@@ -169,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     };
                     //send channel back to sender
-                    let res = match resp.send(channel) {
+                    match resp.send(channel) {
                         Ok(()) => (),
                         Err(e) => {
                             let msg = format!("subscription_thread: Error while sending channel to queue: {} for subscribing", &queue_name);
@@ -214,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                     //send result back to sender
-                    let _ = match resp.send(response) {
+                    match resp.send(response) {
                         Ok(()) => (),
                         Err(e) => {
                             let msg = format!("Error while sending result of publish to queue: {}", &queue_name);
@@ -388,14 +386,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
    //future.await;
 
    //Join handles
-   let mut handles = Vec::with_capacity(6);
-   handles.push(t1);
-   handles.push(t2);
-   handles.push(t3);
-   handles.push(t4);
-   handles.push(t5);
-   handles.push(t6);
-   handles.push(t7);
+   let mut handles = vec![t1, t2, t3, t4, t5, t6, t7];
    block_on(join_all(handles));
 
    let elapsed_time = now.elapsed();

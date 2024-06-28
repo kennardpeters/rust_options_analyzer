@@ -95,7 +95,7 @@ impl<'a> Queue for WritingQueue<'a> {
         let content = match &deliver.content {
             Some(x) => x,
             None => {
-                let msg = format!("writing_queue::process_func - content was None!");
+                let msg = "writing_queue::process_func - content was None!".to_string();
                 return Err(future_err(msg));
             },
         };
@@ -140,8 +140,8 @@ impl<'a> Queue for WritingQueue<'a> {
         };
         let contract = match resp {
             Ok(x) => {
-                if x.is_some() {
-                    x.unwrap()
+                if let Some(x) = x {
+                    x
                 } else {
                     let msg = format!("writing_queue::process_func - Unwrapped None! from Cache for key: {}", contract_name.clone());
                     println!("{}", msg);
@@ -178,8 +178,7 @@ impl<'a> Queue for WritingQueue<'a> {
 
         if self.publish_next_queue {
             let next_key = contract.contract_name;
-            let e_content = String::from(
-                format!(
+            let e_content = format!(
                     r#"
                         {{
                             "publisher": "writing",
@@ -187,7 +186,6 @@ impl<'a> Queue for WritingQueue<'a> {
                         }}
                     "#,
                     next_key 
-                )
             ).into_bytes();
 
             let (pub_resp_tx, pub_resp_rx) = oneshot::channel(); 

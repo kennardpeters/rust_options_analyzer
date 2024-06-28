@@ -241,9 +241,9 @@ impl<'a> MQConnection<'a> {
 
         match channel
             .queue_bind(QueueBindArguments::new(
-                &queue_name,
+                queue_name,
                 exchange,
-                &queue_name,
+                queue_name,
             ))
             .await {
                 Ok(()) => (),
@@ -381,7 +381,7 @@ impl<'a> MQConnection<'a> {
 
         channel
             .queue_bind(QueueBindArguments::new(
-                &queue_name,
+                queue_name,
                 exchange_name,
                 routing_key,
             ))
@@ -439,7 +439,7 @@ impl<'a> MQConnection<'a> {
 
     //close_channel closes the channel passed in as an argument (note the channel is moved)
     pub async fn close_channel(&self, channel: Channel) -> Result<(), Box<dyn std::error::Error + Send>> {
-        let res = match channel.close().await {
+        match channel.close().await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let msg = format!("mq::MQConnection::close_channel() - Error while closing channel: {}", e);
@@ -464,7 +464,7 @@ impl<'a> MQConnection<'a> {
             }
         };
         let seq_len: i64 = queue_sequence.len() as i64;
-        for (key, value) in queue_sequence.into_iter() {
+        for (key, value) in queue_sequence.iter() {
             if value.as_str() == current_queue && *key != seq_len - 1 {
                 let next_key = *key + 1;
                 let next_queue = match queue_sequence.get(&next_key) {
