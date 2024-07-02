@@ -7,6 +7,7 @@ use mq::MQConnection;
 use parsing_queue::ParsingQueue;
 use tokio::signal;
 use tokio::sync::{mpsc, Notify};
+use tracing_subscriber::fmt::time;
 use crate::scraped_cache::ScrapedCache;
 use crate::contract_service::ContractService;
 use serde_json::Value;
@@ -341,52 +342,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         //Ok::<(), Box<dyn std::error::Error + Send>>(())
     });
 
-    //Publish message to parsing queue
-    let (resp_tx, resp_rx) = oneshot::channel();
-    let cmd = mq::PubChannelCommand::Publish { 
-        queue_name: "".to_string(), 
-        content, 
-        resp: resp_tx 
-    };
-    match pub_tx.send(cmd).await {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("main: Error occurred while publishing message: {}", e);
-            process::exit(1);
-        } 
-    }
-    let resp = match resp_rx.await {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!("main: Error returned from result of response");
-            process::exit(1);
-        },
-    };
-    
-    println!("Item Published! from main");
+
+    let first_pub_tx = pub_tx.clone();
+    let first_pub_content = content.clone();
+    let t8 = tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(15));
+
+        // loop indefinitely
+        loop {
+            // Wait for the next tick of the interval
+            interval.tick().await;
+
+            //Publish message to parsing queue
+            //args: tx, queue_name, content
+            match mq::publish_to_queue(first_pub_tx.clone(), "", first_pub_content.clone()).await {
+                Ok(()) => (),
+                Err(e) => {
+                    eprintln!("main: {}", e);
+                    process::exit(1);
+                }
+            }
+            println!("Item Published! from main: {:?}", time());
+        }
+    });
    
-   //let future = async {
-
-       // Define a periodic interval
-       //let mut interval = interval(Duration::from_secs(15));
-
-       ////loop indefinitely
-       //loop {
-           // Wait for the next tick of the interval
-           //interval.tick().await;
-
-           // publish message
-          //mq::publish_to_queue(&mq_connection.channel, exchange_name, routing_key, content).await;
-       //}
-
-       //mq::publish_example().await;
-
-   //};
-   //
-   //future.await;
 
    //Join handles
-   let mut handles = vec![t1, t2, t3, t4, t5, t6, t7];
+   let mut handles = vec![t1, t2, t3, t4, t5, t6, t7, t8];
    block_on(join_all(handles));
 
    let elapsed_time = now.elapsed();

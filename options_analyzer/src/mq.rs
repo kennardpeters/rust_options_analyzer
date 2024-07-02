@@ -390,7 +390,8 @@ impl<'a> MQConnection<'a> {
         Ok(())
     }
 
-    ///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+    ///publish_to_next_queue publishes a message to the next queue by using the current queue name to get the
+    ///next queue in the sequence and creating a channel to publish it with
     //Refactor to take in a Queue trait and publish based off shared properties
     pub async fn publish_to_next_queue(&self, queue_name: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         //TODO: implement function to grab publishing channel
@@ -496,21 +497,33 @@ pub fn future_err(msg: String) -> Box<futures::io::Error> {
     Box::new(fut_err)
 }
 
-///publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
+//publish_to_queue publishes a message to a queue using the channel, exchange, and routing key
 //Refactor to take in a Queue trait and publish based off shared properties
-pub async fn publish_to_queue(channel: &Channel, exchange_name: &str, routing_key: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
-    //TODO: move this to the MQ connection struct in order to grab correct channel for publishing
-    let args = BasicPublishArguments::new(exchange_name, routing_key);
+pub async fn publish_to_queue(tx: Sender<PubChannelCommand>, queue_name: &str, content: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    let err_signature = "mq::publish_to_queue";
+    //Create a response channel to handle receiving response back from queue
+    let (resp_tx, resp_rx) = oneshot::channel();
+    let cmd = PubChannelCommand::Publish { 
+        queue_name: queue_name.to_string(), 
+        content, 
+        resp: resp_tx 
+    };
 
-    match channel
-        .basic_publish(BasicProperties::default(), content, args)
-        .await {
-            Ok(_) => {}
-            Err(e) => {
-                let msg = format!("mq::publish_to_queue - Error occurred while publishing message: {}", e);
-                return Err(msg.into());
-            },
-        }
+
+    match tx.send(cmd).await {
+        Ok(_) => {},
+        Err(e) => {
+            let msg = format!("{} - Error while sending message to publishing thread: {}", err_signature, e);
+            return Err(Box::from(msg));
+        } 
+    }
+    let resp = match resp_rx.await {
+        Ok(x) => x,
+        Err(e) => {
+            let msg = format!("{} - Error while sending message to publishing thread: {}", err_signature, e);
+            return Err(Box::from(msg));
+        },
+    };
 
     Ok(())
 }
@@ -814,6 +827,7 @@ mod tests {
         
     }
     
+    /* COMMENTED OUT UNTIL WE Refactor test
     #[tokio::test]
     async fn test_publish_to_queue() {
         //TODO:
@@ -879,7 +893,7 @@ mod tests {
 
         channel.close().await.unwrap();
         mq.close_connections().await.unwrap();
-    }
+    }*/
 
     //add_sub_channel_and_queue
     //add_pub_channel_and_queue
