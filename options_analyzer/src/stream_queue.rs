@@ -8,6 +8,14 @@ use amqprs::channel::{BasicConsumeArguments, ConsumerMessage};
 use async_trait::async_trait;
 
 
+//PubChannelCommand enum is used to open and close publishing channels to the mq server
+pub enum StreamCommand {
+    StreamContract {
+        contract: String,
+        //resp: Responder<(), Box<dyn std::error::Error + Send>>,
+    },
+}
+
 pub struct StreamQueue<'a> {
     pub name: &'a str,
     sub_tx: Sender<SubChannelCommand>,
@@ -69,7 +77,7 @@ impl<'a> Queue for StreamQueue<'a> {
     fn args(&self) -> BasicConsumeArguments {
         BasicConsumeArguments::new(
             self.name, 
-            "example_basic_pub_sub",
+            "stream",
         )
     }
 

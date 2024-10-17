@@ -311,7 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         //let server = ContractService::new(grpc_cache_tx);
-        let server = ContractService::new(grpc_cache_tx);
+        let server = ContractService::new(grpc_cache_tx /*, stream_tx*/);
 
         let service = match tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)

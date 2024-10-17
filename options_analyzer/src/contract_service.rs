@@ -3,6 +3,7 @@ use std::{pin::Pin, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use crate::scraped_cache::Command;
+use crate::stream_queue::StreamCommand;
 
 pub mod proto {
     tonic::include_proto!("contracts");
@@ -15,15 +16,17 @@ pub mod proto {
 #[derive(Debug)] //removed Default
 pub struct ContractService {
     cache_tx: mpsc::Sender<Command>,
+    //stream_rx: mpsc::Sender<StreamCommand>,
     //rx to receive values from stream queue
     //probably an atomic hashmap of remote addr => contracts to multiplex # of contracts to send to each
     //client
 }
 
 impl ContractService {
-    pub fn new(cache_tx: mpsc::Sender<Command>) -> Self {
+    pub fn new(cache_tx: mpsc::Sender<Command>/*, stream_rx: mpsc::Sender<StreamCommand>*/) -> Self {
         ContractService {
             cache_tx,
+            //stream_rx
         }
     }
 }
@@ -46,7 +49,8 @@ impl Contract for ContractService {
         
         let return_contract_name: String = input.contract_name.clone();
 
-        //TODO: Fix error handling below
+        //TODO: Add some sort of identifier here for each connected client
+
         let (resp_tx, resp_rx) = oneshot::channel();
         let command = Command::Get{
             key: return_contract_name.clone(),
@@ -81,6 +85,7 @@ impl Contract for ContractService {
             },
         };
 
+        //Refactor the below to accept responses from stream_queue
         let repeat_w = std::iter::repeat_with(move || {
             ContractResponse { 
                 time: contract.timestamp.clone().to_string(), 
@@ -98,6 +103,8 @@ impl Contract for ContractService {
             }
         });
         let mut stream = Box::pin(tokio_stream::iter(repeat_w).throttle(Duration::from_millis(200)));
+
+        // END Refactor
 
         // spawn and channel are required if you want to handle "disconnect" functionality
         // the `out_stream` will not be polled after client disconnect

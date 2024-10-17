@@ -384,7 +384,7 @@ mod tests {
     use dotenv::dotenv;
 
 
-    #[ignore = "Used for testing external endpoint"]
+    //#[ignore = "Used for testing external endpoint"]
     #[tokio::test]
     async fn test_async_scrape() {
         dotenv().ok();
@@ -400,7 +400,7 @@ mod tests {
             Err(e) => panic!("SYMBOL not found in environment"),
         };
     
-        let url = format!(r#"https://{}"#, symbol);
+        let url = format!(r#"https://finance.yahoo.com/quote/{}/options?.neo_opt=0"#, symbol);
 
         let output_ts = match async_scrape(url.as_str()).await {
             Ok(x) => x,

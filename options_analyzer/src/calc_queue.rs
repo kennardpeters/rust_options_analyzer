@@ -21,10 +21,14 @@ pub struct CalcQueue<'a> {
     next_routing_key: &'a str, //queue name for publishing to the next queue
     next_exchange_name: &'a str, //Exchange name used for publishing to the next queue
     db_connection: Arc<Mutex<DBConnection<'a>>>,
-    sub_tx: Sender<SubChannelCommand>,
-    pub_tx: Sender<PubChannelCommand>,
+    sub_tx: Sender<SubChannelCommand>, //tx used to subscribe from the queue
+    pub_tx: Sender<PubChannelCommand>, //tx used to communicate with publishing thread to publish content to next queue
     cache_tx: Sender<Command>, //tx used for sending /receiving contracts from cache
+    publish_next_queue: bool, //used to signal whether or not to publish to the next queue
 }
+
+static STRCT: &str = "CalcQueue";
+
 
 impl<'a> CalcQueue<'a> {
     pub fn new(queue_name: &'a str, next_routing_key: &'a str, next_exchange_name: &'a str, db_connection: Arc<Mutex<DBConnection<'a>>>, sub_tx: Sender<SubChannelCommand>, pub_tx: Sender<PubChannelCommand>, cache_tx: Sender<Command>) -> Self {
@@ -36,6 +40,7 @@ impl<'a> CalcQueue<'a> {
             pub_tx,
             sub_tx,
             cache_tx,
+            publish_next_queue: true,
         }
     }
 
@@ -76,11 +81,13 @@ impl<'a> Queue for CalcQueue<'a> {
     }
 
     async fn process_func(&self, deliver: &ConsumerMessage) -> Result<(), Box<dyn std::error::Error + Send>> {
+        let err_signature = STRCT.to_owned() + "::process_func()"; 
+
         //TODO: Implement once we figure out initial statistical model
         let content = match &deliver.content {
             Some(x) => x,
             None => {
-                let msg = "calc_queue::process_func - content was None!".to_string();
+                let msg = format!("{} - content was None!", err_signature);
                 return Err(future_err(msg));
             },
         };
@@ -89,22 +96,61 @@ impl<'a> Queue for CalcQueue<'a> {
         let stringed_bytes = match str::from_utf8(&content) {
             Ok(stringed) => stringed,
             Err(e) => {
-                let msg = format!("calc_queue::process_func - stringing content bytes failed {}", e);
+                let msg = format!("{} - stringing content bytes failed {}", err_signature, e);
                 return Err(future_err(msg));
             },
         };
         let unserialized_content: Value = match serde_json::from_str(&stringed_bytes) {
             Ok(unser_con) => unser_con,
             Err(e) => {
-                let msg = format!("calc_queue::process_func - unserializing content into json failed {}", e);
+                let msg = format!("{} - unserializing content into json failed {}", err_signature, e);
                 return Err(future_err(msg));
 
             }
         };
         //Grab a contract names from the queue item and pull them from cache
         let contract_name = unserialized_content["key"].to_string().replace("\"", "");
-        let msg = format!("calc_queue::process_func - contract name made it to calc queue: {}", contract_name.as_str());
+        let msg = format!("{} - contract name made it to calc queue: {}", err_signature, contract_name.as_str());
         dbg!(msg);
+
+        //TODO: implement publish to next queue
+        if self.publish_next_queue {
+            let current_key = contract_name;
+            let e_content = format!(
+                r#"
+                    {{
+                        "publisher": "calc",
+                        "key": {:?}
+                    }}
+                "#,
+                current_key 
+            ).into_bytes();
+            
+            let (pub_resp_tx, pub_resp_rx) = oneshot::channel(); 
+            
+            let cmd = PubChannelCommand::Publish { 
+                queue_name: String::from(self.queue_name()),
+                content: e_content, 
+                resp: pub_resp_tx,
+            };
+
+            match self.pub_tx.send(cmd).await {
+                Ok(()) => (),
+                Err(e) => {
+                    let msg = format!("{} - Error occurred while sending content to the next queue from queue: {} - {}", err_signature, self.queue_name(), e);
+                    return Err(future_err(msg));
+                }
+            }
+            
+            let resp = match pub_resp_rx.await {
+                Ok(x) => x,
+                Err(e) => {
+                    let msg = format!("{} - Error occurred while awaiting result of send item to the next queue: {}", err_signature, e);
+                    return Err(future_err(msg));
+                }
+            };
+        
+        }
         Ok(())
     }
 }

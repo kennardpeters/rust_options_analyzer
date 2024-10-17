@@ -32,9 +32,9 @@ pub struct WritingQueue<'a> {
     exchange_name: &'a str, //Exchange name used for publishing to the next queue
     db_connection: Arc<Mutex<DBConnection<'a>>>, //struct used for communticating with the database
     sub_tx: Sender<SubChannelCommand>, //tx used to subscribe from the queue 
-    pub_tx: Sender<PubChannelCommand>, //tx used to content to publish to queue
-    cache_tx: Sender<Command>, //use to communicate with caching thread
-    publish_next_queue: bool,
+    pub_tx: Sender<PubChannelCommand>, //tx used to communicate with publishing thread to publish content to next queue
+    cache_tx: Sender<Command>, //used to communicate with caching thread
+    publish_next_queue: bool, //used to signal whether or not to publish to the next queue
 }
 
 impl<'a> WritingQueue<'a> {
