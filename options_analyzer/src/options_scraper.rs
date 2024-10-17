@@ -6,13 +6,14 @@ extern crate curl;
 extern crate serde;
 extern crate reqwest;
 use reqwest::header::{HeaderMap, InvalidHeaderName};
-use crate::config_parse::get_reqwest_headers;
+use crate::{config_parse::get_reqwest_headers, err_loc};
 use scraper::{Html, Selector};
 use tokio::sync::watch::error;
 use std::{env::args, fmt::Error, fs, str, collections::HashMap};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
 use serde_json;
+use regex::Regex;
 
 use curl::easy::Easy;
 
@@ -263,6 +264,23 @@ pub async fn async_scrape(url: &str) -> Result<TimeSeries, Box<dyn std::error::E
     Ok(ts)
 }
 
+fn remove_tags(scraped_element: &str) -> Result<String, Box<dyn std::error::Error>>{
+
+    let re = match Regex::new(r"<.*?>") {
+        Ok(v) => (v),
+        Err(e) => {
+            return Err(Box::from(err_loc!(e)));
+        }
+    };
+
+    let result = re.replace_all(&scraped_element, "");
+
+    println!("{}", result);
+
+    Ok(result.to_string())
+
+}
+
 fn process_bytes(stringed: String) -> Result<TimeSeries, Box<dyn std::error::Error>> {
     //Instantiate list for storing parsed data
     let mut scraped_elements = Vec::new();
@@ -287,7 +305,17 @@ fn process_bytes(stringed: String) -> Result<TimeSeries, Box<dyn std::error::Err
     for element in dom.select(&td_selector) {
             let mut scraped_element = element.inner_html();
             //TODO: Fix this hard coded value to something either inputted or part of a removeList 
-            if scraped_element.contains("<span class=\"svelte-12t6atp\"></span>") {
+            if scraped_element.contains("<") || scraped_element.contains(">") {
+
+                scraped_element = match remove_tags(scraped_element.as_str()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let msg = format!("options_scraper::process_bytes: error while removing tags: {} ", e);
+                        println!("{}", msg);
+                        return Err(msg.into());
+                    }
+                };
+                
                 scraped_element = scraped_element.replace("<span class=\"svelte-12t6atp\"></span>", "");
             }
             scraped_elements.push(scraped_element.clone());
@@ -388,7 +416,7 @@ mod tests {
     use dotenv::dotenv;
 
 
-    #[ignore = "Used for testing external endpoint"]
+    //#[ignore = "Used for testing external endpoint"]
     #[tokio::test]
     async fn test_async_scrape() {
         dotenv().ok();
@@ -404,7 +432,7 @@ mod tests {
             Err(e) => panic!("SYMBOL not found in environment"),
         };
     
-        let url = format!(r#"https://{}"#, symbol);
+        let url = format!(r#"https://finance.yahoo.com/quote/{}/options?.neo_opt=0"#, symbol);
 
         let output_ts = match async_scrape(url.as_str()).await {
             Ok(x) => x,
@@ -437,6 +465,23 @@ mod tests {
         println!("Value fo key2: {}", headers.get("sec-ch-ua").unwrap());
         println!("Keys found: {:?}", headers.keys());
         ()
+    }
+
+    #[test]
+    fn test_replace_tags() {
+
+        let scraped_element = "<span class=\"svelte-12t6atp\">158.00</span>";
+
+
+        let re = Regex::new(r"<.*?>").unwrap();
+
+        let result = re.replace_all(&scraped_element, "");
+
+        println!("{}", result);
+
+        assert_eq!("158.00", result);
+        
+
     }
 }
 
