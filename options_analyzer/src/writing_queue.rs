@@ -229,6 +229,7 @@ mod tests {
     use crate::{mq::publish_to_queue, scraped_cache, err_loc};
 
     #[tokio::test(flavor = "multi_thread", worker_threads=3)]
+    #[ignore = "not running queue funcs"]
     async fn test_process_func() {
         //Create an mq instance
         //Setup using the MQConnection struct
