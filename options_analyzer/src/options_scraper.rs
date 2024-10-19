@@ -479,5 +479,20 @@ mod tests {
         
 
     }
+
+    #[test]
+    fn test_parse_int() {
+        let unparsed_open_interest = "1,181";
+
+        let open_interest = match unparsed_open_interest.replace(",", "").parse::<i64>() {
+            Ok(v) => v,
+            Err(e) => {
+                panic!("types.Contract::parse: Parsing Open_interest {} caused the following error: {:?}", unparsed_open_interest, e);
+                0
+            }
+        };
+
+        assert_eq!(1181, 1181);
+    }
 }
 

@@ -60,21 +60,21 @@ impl Contract {
         //need to parse this out using chronos package
         //self.last_trade_date = NaiveDateTime::parse_from_str(unparsed.last_trade_date.replace("EDT", "").clone(), "%Y-%m-%d %H:%M").unwrap().format("%Y-%m-%d").to_string(); //unparsed.last_trade_date;
         self.last_trade_date = unparsed.last_trade_date.clone();
-        self.strike = match unparsed.strike.parse::<f64>() {
+        self.strike = match unparsed.strike.replace("-", "0").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
                 println!("types.Contract::parse: Parsing Strike {} caused the following error: {:?}", unparsed.strike, e);
                 0.0
             }
         };
-        self.last_price = match unparsed.last_price.parse::<f64>() {
+        self.last_price = match unparsed.last_price.replace("-", "0").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
                 println!("types.Contract::parse: Parsing Last_price {} caused the following error: {:?}", unparsed.last_price, e);
                 0.0
             }
         };
-        self.bid = match unparsed.bid.parse::<f64>() {
+        self.bid = match unparsed.bid.replace("-", "0").parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
                 println!("types.Contract::parse: Parsing Bid {} caused the following error: {:?}", unparsed.bid, e);
@@ -102,11 +102,11 @@ impl Contract {
                 0.0
             }
         };
-        let volume = unparsed.volume.replace("-", "0");
+        let volume = unparsed.volume.replace(",", "").replace("-", "0");
         self.volume = match volume.parse::<i64>() {
             Ok(v) => v,
             Err(e) => {
-                println!("types.Contract::parse: Parsing Open_interest {} caused the following error: {:?}",unparsed.open_interest, e);
+                println!("types.Contract::parse: Parsing Volume {} caused the following error: {:?}",unparsed.volume, e);
                 0
             }
         };

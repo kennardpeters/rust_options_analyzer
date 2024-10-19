@@ -295,7 +295,7 @@ mod tests {
 
 
     #[tokio::test(flavor = "multi_thread", worker_threads=3)]
-    //#[ignore = "polls forever on cloud"]
+    #[ignore = "polls forever on cloud"]
     async fn test_process_func() {
         // create an mq connection
         let mut mq_connection = Arc::new(Mutex::new(MQConnection::new("localhost", 5672, "guest", "guest")));
