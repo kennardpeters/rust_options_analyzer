@@ -15,7 +15,6 @@ pub use crate::scraped_cache::{ScrapedCache, Command};
 use crate::db::DBConnection;
 use crate::mq::{Queue, consume_from_queue, future_err};
 
-
 pub struct CalcQueue<'a> {
     pub name: &'a str,  //Current name of the queue
     next_routing_key: &'a str, //queue name for publishing to the next queue
@@ -107,4 +106,39 @@ impl<'a> Queue for CalcQueue<'a> {
         dbg!(msg);
         Ok(())
     }
+    
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use augurs::{
+        ets::AutoETS,
+        mstl::MSTLModel,
+        prelude::*,
+    };
+
+    #[test]
+    fn test_forecast() {
+
+        let data = &[
+            1.0, 1.2, 1.4, 1.5, 1.4, 1.4, 1.2,
+            1.5, 1.6, 2.0, 1.9, 1.8, 1.9, 2.0,
+        ];
+
+        let periods = vec![7];
+
+        let trend_model = AutoETS::non_seasonal().into_trend_model();
+
+        let mstl = MSTLModel::new(periods, trend_model);
+
+        let fit = mstl.fit(data).unwrap();
+
+        let forecasts = fit.predict(10, 0.99).unwrap();
+
+        println!("{:?}", forecasts);
+    }
+
+
+}
+
